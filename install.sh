@@ -1,168 +1,260 @@
 #!/bin/bash
 
-# Colors
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# =============================================================================
+# 📸 Android Webcam Setup for Linux (Universal)
+# =============================================================================
+# Transforms your Android device into a low-latency HD webcam for Linux.
+# GitHub: https://github.com/TWOJ_NICK/android-webcam-linux
+# =============================================================================
 
-echo -e "${BLUE}=========================================${NC}"
-echo -e "${BLUE}   Android Webcam Setup (Linux Universal)${NC}"
-echo -e "${BLUE}=========================================${NC}"
+# --- CONSTANTS & COLORS ---
+readonly VERSION="2.1.0"
+readonly GREEN='\033[0;32m'
+readonly BLUE='\033[0;34m'
+readonly RED='\033[0;31m'
+readonly YELLOW='\033[1;33m'
+readonly NC='\033[0m' # No Color
 
-# --- FUNCTION: DETECT PACKAGE MANAGER ---
+# --- HELPER FUNCTIONS ---
+
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+print_banner() {
+    echo -e "${BLUE}=========================================${NC}"
+    echo -e "${BLUE}   Android Webcam Setup v${VERSION}  ${NC}"
+    echo -e "${BLUE}=========================================${NC}"
+}
+
+check_internet() {
+    log_info "Checking internet connection..."
+    if ! ping -c 1 8.8.8.8 &> /dev/null; then
+        log_error "No internet connection detected."
+        exit 1
+    fi
+}
+
 detect_distro() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
-        echo $ID
+        echo "$ID"
     else
         echo "unknown"
     fi
 }
 
-DISTRO=$(detect_distro)
-echo -e "Detected distribution: ${BLUE}$DISTRO${NC}"
+check_path() {
+    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+        log_warn "Your ~/.local/bin is NOT in your \$PATH."
+        echo "The script will install correctly, but commands might not run globally."
+        echo "Recommend adding this to ~/.bashrc or ~/.zshrc:"
+        echo -e "${YELLOW}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
+        echo "Continuing in 3 seconds..."
+        sleep 3
+    fi
+}
 
-# --- STEP 1: INSTALL DEPENDENCIES ---
-echo -e "\n${GREEN}[1/5] Installing system dependencies...${NC}"
+uninstall() {
+    echo -e "${RED}!!! WARNING !!!${NC}"
+    echo "This will remove configuration files, icons, and control scripts."
+    read -p "Are you sure? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Aborted."
+        exit 0
+    fi
+    
+    log_info "Removing files..."
+    rm -rf "$HOME/.local/bin/android-cam-toggle.sh"
+    rm -rf "$HOME/.local/bin/android-cam-fix.sh"
+    rm -rf "$HOME/.config/android-webcam"
+    rm -rf "$HOME/.local/share/applications/android-cam.desktop"
+    rm -rf "$HOME/.local/share/applications/android-cam-fix.desktop"
+    
+    echo "Do you want to remove system dependencies (scrcpy, v4l2loopback etc.)?"
+    echo "Only say YES if you don't use them for other things."
+    read -p "Remove packages? (y/N): " pkg_confirm
+    if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
+        DISTRO=$(detect_distro)
+        case $DISTRO in
+            ubuntu|debian|pop|linuxmint|zorin) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils android-tools-adb ;;
+            arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms android-tools ;;
+            fedora) sudo dnf remove -y scrcpy v4l2loopback ;;
+            *) echo "Please remove packages manually for your distro." ;;
+        esac
+    fi
+    
+    log_success "Uninstallation completed."
+    exit 0
+}
+
+# --- ARGUMENT PARSING ---
+case "$1" in
+    --uninstall|-u) uninstall ;;
+    --help|-h) 
+        print_banner
+        echo "Usage: ./install.sh [OPTIONS]"
+        echo "Options:"
+        echo "  --uninstall, -u   Remove the tool and cleanup"
+        echo "  --help, -h        Show this help"
+        exit 0
+        ;;
+esac
+
+# =============================================================================
+# MAIN INSTALLATION LOGIC
+# =============================================================================
+
+print_banner
+check_internet
+check_path
+
+DISTRO=$(detect_distro)
+echo -e "Detected System: ${BLUE}${DISTRO^}${NC}"
+
+# --- STEP 1: DEPENDENCIES ---
+echo -e "\n${GREEN}[1/5] Installing System Dependencies...${NC}"
 
 install_deps() {
     case $DISTRO in
-        ubuntu|debian|pop|linuxmint|kali|neon)
-            echo "Using APT..."
+        ubuntu|debian|pop|linuxmint|kali|neon|zorin)
+            log_info "Using APT..."
             sudo apt update
-            # Ubuntu needs 'v4l2loopback-dkms', Arch needs 'linux-headers'
             DEPS="android-tools-adb v4l2loopback-dkms v4l2loopback-utils ffmpeg libnotify-bin"
             sudo apt install -y $DEPS
             ;;
-        
-        arch|manjaro|endeavouros)
-            echo "Using PACMAN..."
-            # Arch needs headers to compile the module
-            echo -e "${YELLOW}Note: Attempting to install linux-headers. If you use a custom kernel (zen/lts), install headers manually.${NC}"
-            sudo pacman -Sy --needed android-tools v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg libnotify linux-headers
+        arch|manjaro|endeavouros|garuda)
+            log_info "Using PACMAN..."
+            log_warn "Arch users: Ensure you have headers installed (linux-headers / linux-zen-headers) matching your kernel!"
+            sudo pacman -Sy --needed android-tools v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg libnotify
             ;;
-            
-        fedora|rhel|centos)
-            echo "Using DNF..."
+        fedora|rhel|centos|nobara)
+            log_info "Using DNF..."
+            # Check for RPMFusion (needed for v4l2loopback)
+            if ! dnf repolist | grep -q "rpmfusion"; then
+                log_warn "Fedora requires RPMFusion for v4l2loopback."
+                echo "Please enable RPMFusion Free and Non-Free repositories."
+                read -p "Press Enter to try installing anyway (might fail)..."
+            fi
             sudo dnf install -y android-tools v4l2loopback v4l2loopback-utils scrcpy ffmpeg libnotify
             ;;
-            
         opensuse*|suse)
-            echo "Using ZYPPER..."
+            log_info "Using ZYPPER..."
             sudo zypper install -y android-tools v4l2loopback-kmp-default v4l2loopback-utils scrcpy ffmpeg libnotify
             ;;
-            
         *)
-            echo -e "${RED}Unsupported distribution family: $DISTRO${NC}"
-            echo "Please manually install: adb, v4l2loopback, scrcpy, ffmpeg"
+            log_error "Unsupported distribution: $DISTRO"
+            echo "Manual install required: adb, v4l2loopback, scrcpy, ffmpeg, libnotify"
             read -p "Press Enter if you have installed them manually..."
             ;;
     esac
 }
 
 if ! install_deps; then
-    echo -e "${RED}Dependency installation failed. Please check logs.${NC}"
+    log_error "Dependency installation failed."
     exit 1
 fi
 
-# --- STEP 1.5: SCRCPY VERSION CHECK (Universal) ---
-# Arch/Fedora usually have latest scrcpy. Debian/Ubuntu usually have old.
+# --- STEP 1.5: SCRCPY VERSION CHECK ---
+echo -e "\n${GREEN}[Check] Verifying scrcpy version...${NC}"
 
-check_scrcpy_version() {
+check_scrcpy() {
     if ! command -v scrcpy &> /dev/null; then echo "0.0"; return; fi
     scrcpy --version 2>/dev/null | head -n 1 | awk '{print $2}'
 }
 
-CURRENT_VERSION=$(check_scrcpy_version)
-REQUIRED_VERSION="2.0"
+CURRENT_VER=$(check_scrcpy)
+REQUIRED_VER="2.0"
 
-echo "Checking scrcpy version... Found: $CURRENT_VERSION"
-
-# Logic: If version is old AND we are on Ubuntu/Debian -> Force Snap.
-# On Arch/Fedora we trust the repo or user intelligence.
-if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$CURRENT_VERSION" | sort -V | head -n1)" = "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "$REQUIRED_VERSION" ]; then
+# Compare version logic
+if [ "$(printf '%s\n' "$REQUIRED_VER" "$CURRENT_VER" | sort -V | head -n1)" = "$CURRENT_VER" ] && [ "$CURRENT_VER" != "$REQUIRED_VER" ]; then
+    log_warn "Scrcpy v$CURRENT_VER is too old (Need v$REQUIRED_VER+)."
     
-    echo -e "${YELLOW}Version $CURRENT_VERSION is too old (Need 2.0+ for camera).${NC}"
-    
-    # Try Snap only if supported/installed
     if command -v snap &> /dev/null; then
-        echo -e "${GREEN}Snap detected. Installing scrcpy via Snap...${NC}"
-        # Remove apt version to avoid conflict
-        if [ "$DISTRO" == "ubuntu" ] || [ "$DISTRO" == "debian" ]; then
-            sudo apt remove -y scrcpy 2>/dev/null
-        fi
+        log_info "Attempting upgrade via Snap..."
+        # Clean up apt version to prevent conflicts
+        [[ "$DISTRO" =~ (ubuntu|debian|mint|pop|zorin) ]] && sudo apt remove -y scrcpy 2>/dev/null
         
         sudo snap install scrcpy
-        echo "Configuring Snap permissions..."
         sudo snap connect scrcpy:camera
         sudo snap connect scrcpy:raw-usb
+        log_success "Scrcpy installed via Snap."
     else
-        echo -e "${RED}CRITICAL: Your scrcpy is too old and Snap is not available.${NC}"
-        echo "Please install scrcpy 2.0+ manually from GitHub (https://github.com/Genymobile/scrcpy)."
-        echo "The script will try to continue, but camera might fail."
-        read -p "Press Enter to continue..."
+        log_error "Manual update required. Install scrcpy 2.0+ from GitHub."
+        read -p "Press Enter to continue at your own risk (Camera might not work)..."
     fi
 else
-    echo -e "${GREEN}Scrcpy version is OK.${NC}"
+    log_success "Scrcpy v$CURRENT_VER is compatible."
 fi
 
-
-# --- STEP 2: KERNEL MODULE (V4L2LOOPBACK) ---
-echo -e "\n${GREEN}[2/5] Configuring virtual camera driver...${NC}"
+# --- STEP 2: KERNEL MODULE ---
+echo -e "\n${GREEN}[2/5] Configuring V4L2 Module...${NC}"
 
 CONF_FILE="/etc/modprobe.d/v4l2loopback.conf"
 LOAD_FILE="/etc/modules-load.d/v4l2loopback.conf"
 
 if ! grep -q "Android Cam" "$CONF_FILE" 2>/dev/null; then
-    echo "Writing driver configuration..."
-    # Universal config path
+    log_info "Creating module configuration..."
     echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee "$CONF_FILE" > /dev/null
     echo "v4l2loopback" | sudo tee "$LOAD_FILE" > /dev/null
     
-    # Unload/Reload
+    log_info "Reloading module..."
     sudo modprobe -r v4l2loopback 2>/dev/null
     if sudo modprobe v4l2loopback; then
-        echo "Module loaded successfully."
+        log_success "Module loaded."
     else
-        echo -e "${RED}Failed to load kernel module!${NC}"
-        echo "Common fix: Restart your computer (Secure Boot might be blocking unsigned modules)."
-        echo "On Arch/Fedora: Ensure kernel-headers match your kernel version."
+        log_error "Failed to load module."
+        echo -e "${YELLOW}Possible cause: Secure Boot is enabled.${NC}"
+        echo "If so, you need to sign the module or disable Secure Boot in BIOS."
+        echo "Or simply REBOOT your computer and try again."
     fi
 else
-    echo "Driver is already configured."
+    log_success "Module check passed."
 fi
 
-# --- STEP 3: PHONE DETECTION ---
-echo -e "\n${GREEN}[3/5] Pairing phone...${NC}"
+# --- STEP 3: PHONE PAIRING ---
+echo -e "\n${GREEN}[3/5] Pairing Phone...${NC}"
 echo "---------------------------------------------------"
-echo "1. Connect phone via USB."
-echo "2. Enable USB Debugging."
-echo "3. Accept RSA key on phone."
+echo " 1. USB Connection: YES (Connect cable now)"
+echo " 2. USB Debugging:  ENABLED (In Developer Options)"
+echo " 3. RSA Prompt:     ACCEPTED (On phone screen)"
 echo "---------------------------------------------------"
-echo "Waiting for device..."
+log_info "Waiting for device (Ctrl+C to cancel)..."
 
 adb wait-for-usb-device
-PHONE_IP=$(adb shell ip -4 -o addr show wlan0 | awk '{print $4}' | cut -d/ -f1)
+
+log_success "Device connected!"
+log_info "Detecting Wi-Fi IP address..."
+
+# Smart Loop for Interface Detection
+PHONE_IP=""
+for iface in wlan0 swlan0 wlan1 wlan2 eth0; do
+    IP=$(adb shell ip -4 -o addr show $iface 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+    if [ ! -z "$IP" ]; then
+        PHONE_IP=$IP
+        log_success "Found IP ($iface): $PHONE_IP"
+        break
+    fi
+done
 
 if [ -z "$PHONE_IP" ]; then
-    echo -e "${YELLOW}Could not detect IP automatically.${NC}"
-    read -p "Enter phone IP manually: " PHONE_IP
-else
-    echo -e "Found IP: ${BLUE}$PHONE_IP${NC}"
+    log_warn "Could not auto-detect Wi-Fi IP."
+    echo "Make sure the phone is connected to the same Wi-Fi network."
+    read -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
 fi
 
-# Config
+# Save config
 CONFIG_DIR="$HOME/.config/android-webcam"
 mkdir -p "$CONFIG_DIR"
 echo "PHONE_IP=$PHONE_IP:5555" > "$CONFIG_DIR/config.env"
 
+log_info "Enabling TCP/IP mode..."
 adb tcpip 5555
-sleep 2
+sleep 3
 
 # --- STEP 4: SCRIPTS ---
-echo -e "\n${GREEN}[4/5] Creating scripts...${NC}"
+echo -e "\n${GREEN}[4/5] Generating Control Scripts...${NC}"
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 
@@ -172,48 +264,55 @@ cat << 'EOF' > "$BIN_DIR/android-cam-toggle.sh"
 source ~/.config/android-webcam/config.env
 LOG="/tmp/android-cam.log"
 
+# Check if running
 if pgrep -f "scrcpy.*video-source=camera" > /dev/null; then
     pkill -f "scrcpy.*video-source=camera"
-    notify-send -u low -i camera-web "Android Camera" "Stopped."
+    notify-send -u low -i camera-web "Android Camera" "⏹ Stopped"
     exit 0
 fi
 
-notify-send -u low -i camera-web "Android Camera" "Starting..."
+notify-send -u low -i camera-web "Android Camera" "⌛ Connecting..."
 
-# Try to connect (just in case)
+# Try silent reconnect
 adb connect $PHONE_IP > /dev/null
 
-# Start scrcpy
-# Note: Snap path might differ, so we use $(command -v scrcpy)
+# Determine binary path
 SCRCPY_BIN=$(command -v scrcpy)
+if [ -z "$SCRCPY_BIN" ] && [ -f /snap/bin/scrcpy ]; then
+    SCRCPY_BIN="/snap/bin/scrcpy"
+fi
+
+# Launch
 nohup $SCRCPY_BIN -s $PHONE_IP --video-source=camera --camera-facing=front --v4l2-sink=/dev/video0 --no-audio > "$LOG" 2>&1 &
 PID=$!
 
 sleep 3
 if ps -p $PID > /dev/null; then
-    notify-send -u normal -i camera-web "Android Camera" "Active (PID: $PID)"
+    notify-send -u normal -i camera-web "Android Camera" "✅ Active (PID: $PID)"
 else
-    notify-send -u critical -i error "Camera Error" "Check logs in $LOG"
+    ERR=$(head -n 2 "$LOG")
+    notify-send -u critical -i error "Camera Error" "Failed to start"
 fi
 EOF
 
 # -- FIX SCRIPT --
 cat << 'EOF' > "$BIN_DIR/android-cam-fix.sh"
 #!/bin/bash
-notify-send -i smartphone "Camera Setup" "Connect USB..."
+notify-send -i smartphone "Camera Setup" "🔌 Connect USB Cable..."
 adb wait-for-usb-device
 adb tcpip 5555
-notify-send -i smartphone "Camera Setup" "Done! Disconnect USB."
+notify-send -i smartphone "Camera Setup" "✅ Fixed! Unplug USB."
 EOF
 
 chmod +x "$BIN_DIR/android-cam-toggle.sh"
 chmod +x "$BIN_DIR/android-cam-fix.sh"
 
 # --- STEP 5: ICONS ---
-echo -e "\n${GREEN}[5/5] Creating icons...${NC}"
+echo -e "\n${GREEN}[5/5] Creating Launcher Icons...${NC}"
 APP_DIR="$HOME/.local/share/applications"
 mkdir -p "$APP_DIR"
 
+# Main Icon with Right-Click Action
 cat << EOF > "$APP_DIR/android-cam.desktop"
 [Desktop Entry]
 Version=1.0
@@ -224,8 +323,14 @@ Icon=camera-web
 Terminal=false
 Type=Application
 Categories=Utility;Video;
+Actions=Fix;
+
+[Desktop Action Fix]
+Name=Fix Connection (USB)
+Exec=$BIN_DIR/android-cam-fix.sh
 EOF
 
+# Separate Fix Icon (Optional but kept for compatibility)
 cat << EOF > "$APP_DIR/android-cam-fix.desktop"
 [Desktop Entry]
 Version=1.0
@@ -241,7 +346,10 @@ EOF
 update-desktop-database "$APP_DIR" 2>/dev/null
 
 echo -e "\n${BLUE}=========================================${NC}"
-echo -e "${GREEN}   INSTALLATION COMPLETE!                ${NC}"
+echo -e "${GREEN}   ✨ INSTALLATION COMPLETE! ✨          ${NC}"
 echo -e "${BLUE}=========================================${NC}"
-echo "Works on: $DISTRO"
-echo "You can unplug the USB now."
+echo "1. Unplug USB Cable."
+echo "2. Use 'Camera Phone' icon to toggle webcam."
+echo "3. If it fails, use 'Fix Camera (USB)'."
+echo ""
+echo -e "To uninstall, run: ${YELLOW}./install.sh --uninstall${NC}"

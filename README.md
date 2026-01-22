@@ -104,7 +104,14 @@ Or simply run the installer (`install.sh`) again – it will update the configur
 
 ## 🗑️ Uninstall
 
-If you want to remove the tool, simply delete the files:
+If you want to remove the tool, simply run the installer with the uninstall flag:
+
+```bash
+./install.sh --uninstall
+```
+
+Alternatively, you can manually delete the files:
+
 
 ```bash
 # Remove scripts, config, and icons
