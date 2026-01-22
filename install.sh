@@ -30,9 +30,21 @@ print_banner() {
 
 check_internet() {
     log_info "Checking internet connection..."
-    if ! ping -c 1 8.8.8.8 &> /dev/null; then
-        log_error "No internet connection detected."
-        exit 1
+    
+    # Try ping first, fallback to curl if ping is not available
+    if command -v ping >/dev/null 2>&1; then
+        if ! ping -c 1 8.8.8.8 &> /dev/null; then
+            log_error "No internet connection detected (ping failed)."
+            exit 1
+        fi
+    elif command -v curl >/dev/null 2>&1; then
+        if ! curl -s --max-time 3 https://www.google.com >/dev/null 2>&1; then
+            log_error "No internet connection detected (curl failed)."
+            exit 1
+        fi
+    else
+        log_warn "Cannot check internet connection (ping and curl not available)."
+        log_warn "Continuing anyway, but installation may fail if internet is required."
     fi
 }
 
@@ -111,7 +123,9 @@ check_internet
 check_path
 
 DISTRO=$(detect_distro)
-echo -e "Detected System: ${BLUE}${DISTRO^}${NC}"
+# Capitalize first letter (compatible with both GNU sed and BSD sed)
+DISTRO_CAPITALIZED=$(echo "$DISTRO" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+echo -e "Detected System: ${BLUE}${DISTRO_CAPITALIZED}${NC}"
 
 # --- STEP 1: DEPENDENCIES ---
 echo -e "\n${GREEN}[1/5] Installing System Dependencies...${NC}"
@@ -178,22 +192,39 @@ version_compare() {
     if [ "$current" = "0.0" ]; then
         return 1
     fi
-    # Compare versions using sort -V
-    local result
-    result=$(printf '%s\n' "$required" "$current" | sort -V | head -n1)
-    [ "$result" = "$required" ] || [ "$result" = "$current" ] && [ "$current" != "$required" ] && [ "$(printf '%s\n' "$required" "$current" | sort -V | tail -n1)" = "$current" ]
+    # Compare versions using sort -V: check if current >= required
+    # If required is the first (smallest) when sorted, then current >= required
+    local sorted
+    sorted=$(printf '%s\n' "$required" "$current" | sort -V | head -n1)
+    [ "$sorted" = "$required" ]
 }
 
 ensure_scrcpy() {
     local REQUIRED_VER="2.0"
     local scrcpy_bin=""
     local current_ver="0.0"
+    local temp_file=""
+    local extract_dir=""
+    
+    # Cleanup function for temporary files on exit/interrupt
+    cleanup_temp_files() {
+        if [ ! -z "$extract_dir" ] && [ -d "$extract_dir" ]; then
+            rm -rf "$extract_dir" 2>/dev/null
+        fi
+        if [ ! -z "$temp_file" ] && [ -f "$temp_file" ]; then
+            rm -f "$temp_file" 2>/dev/null
+        fi
+    }
+    
+    # Set trap for cleanup on interrupt
+    trap cleanup_temp_files INT TERM EXIT
     
     # Check if scrcpy already exists and is compatible
     if command -v scrcpy >/dev/null 2>&1; then
         scrcpy_bin=$(command -v scrcpy)
         current_ver=$(check_scrcpy_version "$scrcpy_bin")
         if version_compare "$REQUIRED_VER" "$current_ver"; then
+            trap - INT TERM EXIT  # Remove trap before return
             log_success "Found compatible scrcpy v$current_ver at $scrcpy_bin"
             return 0
         else
@@ -206,6 +237,7 @@ ensure_scrcpy() {
         scrcpy_bin="/snap/bin/scrcpy"
         current_ver=$(check_scrcpy_version "$scrcpy_bin")
         if version_compare "$REQUIRED_VER" "$current_ver"; then
+            trap - INT TERM EXIT  # Remove trap before return
             log_success "Found compatible scrcpy v$current_ver (snap)"
             return 0
         fi
@@ -215,13 +247,14 @@ ensure_scrcpy() {
     if command -v snap >/dev/null 2>&1; then
         log_info "Attempting to install scrcpy via Snap..."
         if sudo snap install scrcpy 2>/dev/null; then
-            sudo snap connect scrcpy:camera 2>/dev/null
-            sudo snap connect scrcpy:raw-usb 2>/dev/null
+            sudo snap connect scrcpy:camera 2>/dev/null || true
+            sudo snap connect scrcpy:raw-usb 2>/dev/null || true
             sleep 2
             if [ -f /snap/bin/scrcpy ]; then
                 scrcpy_bin="/snap/bin/scrcpy"
                 current_ver=$(check_scrcpy_version "$scrcpy_bin")
                 if version_compare "$REQUIRED_VER" "$current_ver"; then
+                    trap - INT TERM EXIT  # Remove trap before return
                     log_success "Installed scrcpy v$current_ver via Snap"
                     return 0
                 fi
@@ -233,63 +266,103 @@ ensure_scrcpy() {
     if command -v flatpak >/dev/null 2>&1; then
         log_info "Attempting to install scrcpy via Flatpak..."
         if flatpak install -y flathub org.scrcpy.ScrCpy 2>/dev/null; then
-            scrcpy_bin="flatpak run org.scrcpy.ScrCpy"
-            # Flatpak version check
-            current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0")
-            if version_compare "$REQUIRED_VER" "$current_ver"; then
-                log_success "Installed scrcpy v$current_ver via Flatpak"
-                return 0
+            # Verify installation succeeded
+            if flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+                scrcpy_bin="flatpak run org.scrcpy.ScrCpy"
+                # Flatpak version check
+                current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0")
+                if version_compare "$REQUIRED_VER" "$current_ver"; then
+                    trap - INT TERM EXIT  # Remove trap before return
+                    log_success "Installed scrcpy v$current_ver via Flatpak"
+                    return 0
+                fi
+            fi
             fi
         fi
     fi
     
     # Try downloading from GitHub Releases
-    log_info "Attempting to download scrcpy from GitHub Releases..."
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64) arch="x86_64" ;;
-        aarch64|arm64) arch="arm64" ;;
-        armv7l|armv6l) arch="armv7" ;;
-        *) arch="x86_64" ;; # fallback
-    esac
-    
-    local download_dir="$HOME/.local/bin"
-    mkdir -p "$download_dir"
-    
-    # Get latest release URL
-    local latest_url
-    latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | head -n 1)
-    
-    if [ ! -z "$latest_url" ]; then
-        log_info "Downloading scrcpy from GitHub..."
-        local temp_file
-        temp_file=$(mktemp)
-        if curl -L -f -s "$latest_url" -o "$temp_file" 2>/dev/null; then
-            local extract_dir
-            extract_dir=$(mktemp -d)
-            if tar -xf "$temp_file" -C "$extract_dir" 2>/dev/null; then
-                # Find scrcpy binary in extracted directory
-                local found_bin
-                found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | head -n 1)
-                if [ ! -z "$found_bin" ]; then
-                    cp "$found_bin" "$download_dir/scrcpy" 2>/dev/null
-                    chmod +x "$download_dir/scrcpy"
-                    rm -rf "$extract_dir"
-                    rm -f "$temp_file"
-                    
-                    scrcpy_bin="$download_dir/scrcpy"
-                    current_ver=$(check_scrcpy_version "$scrcpy_bin")
-                    if version_compare "$REQUIRED_VER" "$current_ver"; then
-                        log_success "Downloaded and installed scrcpy v$current_ver to $download_dir"
-                        return 0
+    if ! command -v curl >/dev/null 2>&1; then
+        log_warn "curl not found, skipping GitHub download method."
+    elif ! command -v tar >/dev/null 2>&1; then
+        log_warn "tar not found, skipping GitHub download method."
+    elif ! command -v mktemp >/dev/null 2>&1; then
+        log_warn "mktemp not found, skipping GitHub download method."
+    elif ! command -v find >/dev/null 2>&1; then
+        log_warn "find not found, skipping GitHub download method."
+    else
+        log_info "Attempting to download scrcpy from GitHub Releases..."
+        local arch
+        arch=$(uname -m)
+        case "$arch" in
+            x86_64) arch="x86_64" ;;
+            aarch64|arm64) arch="arm64" ;;
+            armv7l|armv6l) arch="armv7" ;;
+            *) arch="x86_64" ;; # fallback
+        esac
+        
+        local download_dir="$HOME/.local/bin"
+        mkdir -p "$download_dir"
+        
+        # Get latest release URL
+        # Use sed as fallback if grep -o is not available
+        local latest_url
+        if echo "test" | grep -o "test" >/dev/null 2>&1; then
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | head -n 1)
+        else
+            # Fallback using sed (more portable)
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | head -n 1)
+        fi
+        
+        if [ ! -z "$latest_url" ]; then
+            log_info "Downloading scrcpy from GitHub..."
+            temp_file=$(mktemp)
+            if [ -z "$temp_file" ] || [ ! -f "$temp_file" ]; then
+                log_warn "Failed to create temporary file, skipping GitHub download..."
+                cleanup_temp_files
+            elif curl -L -f -s "$latest_url" -o "$temp_file" 2>/dev/null; then
+                # Validate downloaded file (check size > 0)
+                if [ ! -s "$temp_file" ]; then
+                    log_warn "Downloaded file is empty, skipping..."
+                    cleanup_temp_files
+                else
+                    extract_dir=$(mktemp -d)
+                    if [ -z "$extract_dir" ] || [ ! -d "$extract_dir" ]; then
+                        log_warn "Failed to create temporary directory, skipping..."
+                        cleanup_temp_files
+                    elif tar -xf "$temp_file" -C "$extract_dir" 2>/dev/null; then
+                        # Find scrcpy binary in extracted directory
+                        local found_bin
+                        found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | head -n 1)
+                        if [ ! -z "$found_bin" ]; then
+                            if ! cp "$found_bin" "$download_dir/scrcpy" 2>/dev/null; then
+                                log_warn "Failed to copy scrcpy binary, skipping..."
+                                cleanup_temp_files
+                            elif ! chmod +x "$download_dir/scrcpy" 2>/dev/null; then
+                                log_warn "Failed to make scrcpy executable, skipping..."
+                                cleanup_temp_files
+                            else
+                                scrcpy_bin="$download_dir/scrcpy"
+                                current_ver=$(check_scrcpy_version "$scrcpy_bin")
+                                if version_compare "$REQUIRED_VER" "$current_ver"; then
+                                    cleanup_temp_files
+                                    trap - INT TERM EXIT  # Remove trap after success
+                                    log_success "Downloaded and installed scrcpy v$current_ver to $download_dir"
+                                    return 0
+                                fi
+                            fi
+                        fi
                     fi
+                    cleanup_temp_files
                 fi
-                rm -rf "$extract_dir"
+            else
+                cleanup_temp_files
             fi
-            rm -f "$temp_file"
         fi
     fi
+    
+    # Remove trap before exit
+    trap - INT TERM EXIT
     
     # If we get here, nothing worked
     log_error "Failed to install scrcpy >= v$REQUIRED_VER"
@@ -313,8 +386,14 @@ LOAD_FILE="/etc/modules-load.d/v4l2loopback.conf"
 
 if ! grep -q "Android Cam" "$CONF_FILE" 2>/dev/null; then
     log_info "Creating module configuration..."
-    echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee "$CONF_FILE" > /dev/null
-    echo "v4l2loopback" | sudo tee "$LOAD_FILE" > /dev/null
+    if ! echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee "$CONF_FILE" > /dev/null; then
+        log_error "Failed to create module configuration file."
+        log_warn "Continuing anyway, but module may not work properly..."
+    fi
+    if ! echo "v4l2loopback" | sudo tee "$LOAD_FILE" > /dev/null; then
+        log_error "Failed to create module load file."
+        log_warn "Continuing anyway, but module may not auto-load on boot..."
+    fi
     
     log_info "Reloading module..."
     sudo modprobe -r v4l2loopback 2>/dev/null
@@ -368,14 +447,19 @@ log_success "Device connected!"
 log_info "Detecting Wi-Fi IP address..."
 
 PHONE_IP=""
-for iface in wlan0 swlan0 wlan1 wlan2 eth0; do
-    IP=$(adb shell ip -4 -o addr show $iface 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
-    if [ ! -z "$IP" ]; then
-        PHONE_IP=$IP
-        log_success "Found IP ($iface): $PHONE_IP"
-        break
-    fi
-done
+# Check if awk and cut are available for auto-detection
+if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
+    for iface in wlan0 swlan0 wlan1 wlan2 eth0; do
+        IP=$(adb shell ip -4 -o addr show $iface 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+        if [ ! -z "$IP" ]; then
+            PHONE_IP=$IP
+            log_success "Found IP ($iface): $PHONE_IP"
+            break
+        fi
+    done
+else
+    log_warn "awk or cut not found, skipping auto-detection."
+fi
 
 if [ -z "$PHONE_IP" ]; then
     log_warn "Could not auto-detect Wi-Fi IP."
@@ -439,8 +523,8 @@ NC='\033[0m'
 
 # --- Cleanup on exit ---
 cleanup_on_exit() {
-    # Cleanup function for trap
-    exit 0
+    # Cleanup function for trap (no exit - let script handle exit codes)
+    :
 }
 
 trap cleanup_on_exit INT TERM
@@ -501,9 +585,12 @@ load_config() {
     
     # Migration from v2.0 (config.env) if settings.conf missing
     if [ ! -f "$CONFIG_FILE" ] && [ -f "$CONFIG_DIR/config.env" ]; then
-        source "$CONFIG_DIR/config.env"
+        if ! source "$CONFIG_DIR/config.env" 2>/dev/null; then
+            echo -e "${YELLOW}Warning:${NC} Error loading old config.env, using defaults"
+        fi
         # Extract IP from OLD format (IP:PORT)
-        CLEAN_IP=$(echo "$PHONE_IP" | cut -d: -f1)
+        # Use sed instead of cut for better compatibility
+        CLEAN_IP=$(echo "$PHONE_IP" | sed 's/:.*$//')
         
         # Write new config
         cat << END_CONF > "$CONFIG_FILE"
@@ -528,7 +615,11 @@ EXTRA_ARGS="$DEFAULT_ARGS"
 END_CONF
     fi
 
-    source "$CONFIG_FILE"
+    if ! source "$CONFIG_FILE" 2>/dev/null; then
+        echo -e "${RED}Error:${NC} Failed to load configuration file: $CONFIG_FILE"
+        echo "Please check the file for syntax errors."
+        return 1
+    fi
 }
 
 # --- Helpers ---
@@ -539,7 +630,13 @@ notify() {
     local msg="$3"
     local icon="$4"
     if [ -z "$icon" ]; then icon="camera-web"; fi
-    notify-send -u "$level" -i "$icon" "$title" "$msg"
+    
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -u "$level" -i "$icon" "$title" "$msg" 2>/dev/null || true
+    else
+        # Fallback to echo if notify-send is not available
+        echo "[$level] $title: $msg" >&2
+    fi
 }
 
 is_running() {
@@ -553,7 +650,7 @@ find_scrcpy() {
         echo "/snap/bin/scrcpy"
     elif [ -f "$HOME/.local/bin/scrcpy" ]; then
         echo "$HOME/.local/bin/scrcpy"
-    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app | grep -q org.scrcpy.ScrCpy; then
+    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
         echo "flatpak run org.scrcpy.ScrCpy"
     else
         return 1
@@ -569,7 +666,9 @@ cmd_start() {
         return 1
     fi
     
-    load_config
+    if ! load_config; then
+        return 1
+    fi
     
     if is_running; then
         echo "Camera is already active."
@@ -644,6 +743,14 @@ cmd_start() {
     
     if [ ! -z "$BIT_RATE" ]; then
         CMD+=("--video-bit-rate=$BIT_RATE")
+    fi
+    
+    # Check if video device exists
+    if [ ! -c /dev/video10 ]; then
+        echo -e "${RED}Error:${NC} /dev/video10 not found. v4l2loopback module may not be loaded."
+        echo "Try running: sudo modprobe v4l2loopback"
+        notify "critical" "Android Camera" "Video device not found" "error"
+        return 1
     fi
     
     CMD+=("--v4l2-sink=/dev/video10")
@@ -747,7 +854,9 @@ cmd_fix() {
 }
 
 cmd_status() {
-    load_config
+    if ! load_config; then
+        return 1
+    fi
     echo -e "--- ${BLUE}Android Camera Status${NC} ---"
     
     if is_running; then
@@ -798,9 +907,26 @@ cmd_status() {
 }
 
 cmd_config() {
-    load_config
-    EDITOR=${EDITOR:-nano}
-    $EDITOR "$CONFIG_FILE"
+    if ! load_config; then
+        return 1
+    fi
+    
+    # Find available editor
+    local editor=""
+    if [ ! -z "$EDITOR" ] && command -v "$EDITOR" >/dev/null 2>&1; then
+        editor="$EDITOR"
+    elif command -v nano >/dev/null 2>&1; then
+        editor="nano"
+    elif command -v vi >/dev/null 2>&1; then
+        editor="vi"
+    elif command -v vim >/dev/null 2>&1; then
+        editor="vim"
+    else
+        echo -e "${RED}Error:${NC} No editor found. Please install nano, vi, or set EDITOR environment variable."
+        return 1
+    fi
+    
+    $editor "$CONFIG_FILE"
 }
 
 # --- Main ---
@@ -819,7 +945,10 @@ case "$1" in
 esac
 EOF
 
-chmod +x "$BIN_DIR/android-webcam-ctl"
+if ! chmod +x "$BIN_DIR/android-webcam-ctl" 2>/dev/null; then
+    log_error "Failed to make android-webcam-ctl executable!"
+    exit 1
+fi
 
 # Generate Config
 CONFIG_DIR="$HOME/.config/android-webcam"
@@ -840,7 +969,13 @@ EOF
 else
     log_info "Updating IP in existing config..."
     # File exists (we're in the else block), so update it
-    sed -i "s|PHONE_IP=.*|PHONE_IP=\"$PHONE_IP\"|" "$CONFIG_FILE"
+    if ! sed -i "s|PHONE_IP=.*|PHONE_IP=\"$PHONE_IP\"|" "$CONFIG_FILE" 2>/dev/null; then
+        log_warn "Failed to update IP in config file (may be read-only). Creating backup..."
+        # Try to create a new file if sed fails
+        if [ -w "$CONFIG_FILE" ]; then
+            sed "s|PHONE_IP=.*|PHONE_IP=\"$PHONE_IP\"|" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE" 2>/dev/null || log_warn "Could not update config file"
+        fi
+    fi
 fi
 
 # --- STEP 5: ICONS ---

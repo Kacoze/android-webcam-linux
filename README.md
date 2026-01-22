@@ -4,7 +4,7 @@ Turn your Android phone into a professional HD webcam for Linux.
 **No dedicated apps required on the phone.** This solution relies on system `ADB` and the `scrcpy` engine.
 
 ![Bash](https://img.shields.io/badge/Language-Bash-4EAA25?style=flat-square)
-![OS](https://img.shields.io/badge/OS-Linux%20(Ubuntu%2FDebian)-orange?style=flat-square)
+![OS](https://img.shields.io/badge/OS-Linux%20(Universal)-orange?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 
 ## ✨ Why this solution?
@@ -15,16 +15,18 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 *   ⚡ **Ultra low latency** (via P2P protocol and `scrcpy`).
 *   🎥 **High Quality** (HD/Full HD depending on phone).
 *   🐧 **Native Integration** (visible as `/dev/video10` in Zoom, Teams, OBS, Chrome).
-*   🔋 **Battery Saving** (phone screen is automatically turned off during operation).
+*   🔋 **Battery Saving** (phone screen typically turns off during operation to save battery).
 
 ---
 
 ## ⚙️ Requirements
 
-1.  **System:** Linux (tested on Ubuntu 22.04 / 24.04, Debian, Mint, Pop!_OS).
+1.  **System:** Linux (tested on Ubuntu 22.04 / 24.04, Debian, Mint, Pop!_OS, Arch Linux, Manjaro, Fedora, openSUSE, and others).
 2.  **Phone:** Android 5.0 or newer.
 3.  **Network:** Computer and phone must be on the same Wi-Fi network.
 4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this).
+5.  **Privileges:** Administrator access (sudo) required for installing system packages and kernel modules.
+6.  **Internet:** Active internet connection required for downloading dependencies and scrcpy.
 
 ### 📱 Step 0: Phone Preparation (One-time only)
 
@@ -39,10 +41,16 @@ Before running the installer, you must enable **USB Debugging** on your phone:
 
 ## 📥 Installation (One-Liner)
 
-Open a terminal (Ctrl+Alt+T) and paste the following command:
+Open a terminal (Ctrl+Alt+T) and paste one of the following commands:
 
+**Using wget:**
 ```bash
 wget -O - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | bash
+```
+
+**Or using curl (if wget is not available):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | bash
 ```
 
 > **Note:** The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices.
@@ -63,7 +71,7 @@ When you want to join a call:
 **What happens?**
 
 *   A system notification appears: "Android Camera: Active".
-*   The phone screen turns off automatically (to save battery).
+*   The phone screen typically turns off automatically (to save battery).
 *   Open Zoom/Teams/Discord and select the camera: **Android Cam** (appears as `/dev/video10`).
 
 **To turn off:** Simply click the **📷 Camera Phone** icon again or use the notification action.
@@ -71,7 +79,7 @@ When you want to join a call:
 ### 2. Advanced Controls (Right-Click)
 
 Right-click the **Camera Phone** icon to access:
-- **Settings**: Open the configuration file allows you to change back/front camera, resolution, etc.
+- **Settings**: Opening the configuration file allows you to change back/front camera, resolution, etc.
 - **Check Status**: See if the camera is running and check current settings.
 - **Fix Connection**: Quick access to USB re-pairing tool.
 
@@ -98,7 +106,7 @@ File location: `~/.config/android-webcam/settings.conf`
 
 ```bash
 CAMERA_FACING="back"      # Options: front, back, external
-VIDEO_SIZE="1080"         # Max dimension in pixels (e.g., 1080 for 1080p), leave empty for max resolution
+VIDEO_SIZE=""             # Max dimension in pixels (e.g., "1080" for 1080p), leave empty for max resolution
 BIT_RATE="8M"             # Higher = better quality, more latency
 ```
 
@@ -133,9 +141,14 @@ If you want to remove the tool:
 ./install.sh --uninstall
 ```
 
-**If you installed via one-liner (`wget ... | bash`):**
+**If you installed via one-liner (`wget ... | bash` or `curl ... | bash`):**
 ```bash
+# Using wget:
 wget -O /tmp/install.sh https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh
+bash /tmp/install.sh --uninstall
+
+# Or using curl:
+curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh -o /tmp/install.sh
 bash /tmp/install.sh --uninstall
 ```
 
@@ -148,7 +161,17 @@ rm -rf ~/.config/android-webcam
 rm -rf ~/.local/share/applications/android-cam*
 
 # Optional: remove system dependencies
+# Ubuntu/Debian/Mint:
 sudo apt remove v4l2loopback-dkms scrcpy
+
+# Arch/Manjaro:
+sudo pacman -Rs v4l2loopback-dkms scrcpy
+
+# Fedora:
+sudo dnf remove v4l2loopback scrcpy
+
+# openSUSE:
+sudo zypper remove v4l2loopback-kmp-default scrcpy
 ```
 
 ## 🤝 Credits
