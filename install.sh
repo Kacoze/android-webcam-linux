@@ -483,7 +483,7 @@ EXTRA_ARGS="--no-audio --buffer=400"
 EOF
 else
     log_info "Updating IP in existing config..."
-    sed -i "s/PHONE_IP=.*/PHONE_IP=\"$PHONE_IP\"/" "$CONFIG_FILE"
+    sed -i "s|PHONE_IP=.*|PHONE_IP=\"$PHONE_IP\"|" "$CONFIG_FILE"
 fi
 
 # --- STEP 5: ICONS ---
@@ -511,10 +511,12 @@ Terminal=true
 [Desktop Action Config]
 Name=Settings
 Exec=$BIN_DIR/android-webcam-ctl config
+Terminal=true
 
 [Desktop Action Fix]
 Name=Fix Connection (USB)
 Exec=$BIN_DIR/android-webcam-ctl fix
+Terminal=true
 EOF
 
 # Separate Fix Icon (Optional but useful)
@@ -525,7 +527,7 @@ Name=Fix Camera (USB)
 Comment=Reconnect after restart
 Exec=$BIN_DIR/android-webcam-ctl fix
 Icon=smartphone
-Terminal=false
+Terminal=true
 Type=Application
 Categories=Utility;Settings;
 EOF

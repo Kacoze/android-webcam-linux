@@ -169,13 +169,13 @@ cmd_toggle() {
 }
 
 cmd_fix() {
-    notify-send -i smartphone "Camera Setup" "🔌 Connect USB Cable..." "smartphone"
+    notify-send -i smartphone "Camera Setup" "🔌 Connect USB Cable..."
     echo -e "${BLUE}Waiting for USB device...${NC}"
     adb wait-for-usb-device
     echo "Device connected. Enabling TCP/IP mode..."
     adb tcpip 5555
     echo -e "${GREEN}Done! You can disconnect USB now.${NC}"
-    notify-send -i smartphone "Camera Setup" "✅ Fixed! Unplug USB." "smartphone"
+    notify-send -i smartphone "Camera Setup" "✅ Fixed! Unplug USB."
 }
 
 cmd_status() {
