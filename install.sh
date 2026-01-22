@@ -89,7 +89,7 @@ uninstall() {
     read -p "Remove packages? (y/N): " pkg_confirm
     if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
         DISTRO=$(detect_distro)
-        case $DISTRO in
+        case "$DISTRO" in
             ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils ;;
             arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms ;;
             fedora) sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils ;;
@@ -136,7 +136,7 @@ echo -e "Detected System: ${BLUE}${DISTRO_CAPITALIZED}${NC}"
 echo -e "\n${GREEN}[1/5] Installing System Dependencies...${NC}"
 
 install_deps() {
-    case $DISTRO in
+    case "$DISTRO" in
         ubuntu|debian|pop|linuxmint|kali|neon|zorin)
             log_info "Using APT..."
             sudo apt update
@@ -492,7 +492,7 @@ if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
                     fi
                 done
                 if [ "$valid" = true ]; then
-                    PHONE_IP=$IP
+                    PHONE_IP="$IP"
                     log_success "Found IP ($iface): $PHONE_IP"
                     break
                 fi
@@ -506,7 +506,7 @@ fi
 if [ -z "$PHONE_IP" ]; then
     log_warn "Could not auto-detect Wi-Fi IP."
     while true; do
-        read -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
+        read -r -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
         # Validate IP format
         if [[ "$PHONE_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
             # Check each octet is 0-255
@@ -1050,7 +1050,7 @@ cmd_config() {
         return 1
     fi
     
-    $editor "$CONFIG_FILE"
+    "$editor" "$CONFIG_FILE"
 }
 
 # --- Main ---
@@ -1082,6 +1082,12 @@ mkdir -p "$CONFIG_DIR"
 # Only create if doesn't exist to respect user edits on re-install
 if [ ! -f "$CONFIG_FILE" ]; then
     log_info "Creating initial configuration..."
+    # Additional safety check: ensure IP doesn't contain dangerous characters for heredoc
+    # (IP is already validated, but this is defense in depth)
+    if [[ "$PHONE_IP" =~ [\"\`\$] ]]; then
+        log_warn "IP contains unsafe characters. Clearing IP for safety."
+        PHONE_IP=""
+    fi
     cat << EOF > "$CONFIG_FILE"
 # Android Webcam Configuration
 PHONE_IP="$PHONE_IP"
@@ -1093,7 +1099,11 @@ EOF
 else
     log_info "Updating IP in existing config..."
     # File exists (we're in the else block), so update it
-    if ! sed -i "s|PHONE_IP=.*|PHONE_IP=\"$PHONE_IP\"|" "$CONFIG_FILE" 2>/dev/null; then
+    # Escape special characters in PHONE_IP for safe use in sed
+    # Note: sed -i without suffix works on GNU sed (Linux)
+    # On BSD sed (macOS), would need: sed -i '' "s|..."
+    ESCAPED_IP=$(printf '%s\n' "$PHONE_IP" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    if ! sed -i "s|PHONE_IP=.*|PHONE_IP=\"$ESCAPED_IP\"|" "$CONFIG_FILE" 2>/dev/null; then
         log_warn "Could not update IP in config. Please edit $CONFIG_FILE manually."
         log_warn "Set: PHONE_IP=\"$PHONE_IP\""
     fi

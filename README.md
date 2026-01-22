@@ -26,7 +26,9 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 3.  **Network:** Computer and phone must be on the same Wi-Fi network.
 4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this).
 5.  **Privileges:** Administrator access (sudo) required for installing system packages and kernel modules.
-6.  **Internet:** Active internet connection required for downloading dependencies and scrcpy.
+6.  **Internet:** Active internet connection is **required during installation** for:
+    - Downloading system dependencies (via package manager)
+    - Downloading `scrcpy` from GitHub Releases (if not available via package manager, Snap, or Flatpak)
 
 ### 📱 Step 0: Phone Preparation (One-time only)
 
