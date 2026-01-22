@@ -12,12 +12,29 @@ echo -e "${BLUE}=========================================${NC}"
 
 # STEP 1: Dependencies
 echo -e "\n${GREEN}[1/5] Installing system dependencies...${NC}"
-DEPENDENCIES="android-tools-adb v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg"
+DEPENDENCIES="android-tools-adb v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg libnotify-bin"
 
 # Update and install (apt will skip already installed ones)
 if ! sudo apt update && sudo apt install -y $DEPENDENCIES; then
     echo -e "${RED}Package installation failed! Check your internet connection.${NC}"
     exit 1
+    exit 1
+fi
+
+# Check scrcpy version
+SCRCPY_VERSION=$(scrcpy --version 2>/dev/null | head -n 1 | awk '{print $2}')
+REQUIRED_VERSION="2.0"
+
+if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$SCRCPY_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
+   echo -e "${RED}WARNING: Installed scrcpy version ($SCRCPY_VERSION) is older than $REQUIRED_VERSION.${NC}"
+   echo "The camera feature requires scrcpy 2.0 or newer."
+   echo "Attempting to install via Snap..."
+   if sudo snap install scrcpy; then
+       echo -e "${GREEN}Scrcpy updated via Snap!${NC}"
+   else
+       echo -e "${RED}Failed to install via Snap. You might need to install scrcpy manually.${NC}"
+       read -p "Press Enter to continue anyway (might fail)..."
+   fi
 fi
 
 # STEP 2: Video module configuration (v4l2loopback)
@@ -96,9 +113,10 @@ fi
 notify-send -u low -i camera-web "Android Camera" "Connecting to $PHONE_IP..."
 
 # Attempt connection
+# Try connecting and running scrcpy
 adb connect $PHONE_IP > /dev/null
-# Even if adb connect returns error, scrcpy might still connect, so try running:
 
+# Try running scrcpy with camera source (requires scrcpy >= 2.0)
 nohup scrcpy -s $PHONE_IP --video-source=camera --camera-facing=front --v4l2-sink=/dev/video0 --no-audio > "$LOG" 2>&1 &
 PID=$!
 

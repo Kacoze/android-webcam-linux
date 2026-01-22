@@ -24,6 +24,7 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 1.  **System:** Linux (tested on Ubuntu 22.04 / 24.04, Debian, Mint, Pop!_OS).
 2.  **Phone:** Android 5.0 or newer.
 3.  **Network:** Computer and phone must be on the same Wi-Fi network.
+4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this).
 
 ### 📱 Step 0: Phone Preparation (One-time only)
 
@@ -41,7 +42,7 @@ Before running the installer, you must enable **USB Debugging** on your phone:
 Open a terminal (Ctrl+Alt+T) and paste the following command:
 
 ```bash
-wget -O - https://raw.githubusercontent.com/TWOJ_NICK/android-webcam-linux/main/install.sh | bash
+wget -O - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | bash
 ```
 
 > **Note:** The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices.
