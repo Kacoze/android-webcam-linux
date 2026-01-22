@@ -277,7 +277,6 @@ ensure_scrcpy() {
                     return 0
                 fi
             fi
-            fi
         fi
     fi
     
@@ -640,7 +639,15 @@ notify() {
 }
 
 is_running() {
-    pgrep -f "scrcpy.*video-source=camera" > /dev/null
+    # Check if scrcpy process is running
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "scrcpy.*video-source=camera" > /dev/null
+    elif command -v ps >/dev/null 2>&1; then
+        ps aux 2>/dev/null | grep -q "[s]crcpy.*video-source=camera"
+    else
+        # Fallback: try to find process by PID file or return false
+        return 1
+    fi
 }
 
 find_scrcpy() {
@@ -792,23 +799,62 @@ cmd_start() {
     echo "Executing: ${CMD[*]}"
     
     # Run in background
-    nohup "${CMD[@]}" > "$LOG_FILE" 2>&1 &
-    PID=$!
+    local PID=""
+    if command -v nohup >/dev/null 2>&1; then
+        nohup "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        PID=$!
+    elif command -v setsid >/dev/null 2>&1; then
+        # Fallback: use setsid if available
+        setsid "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        PID=$!
+    else
+        # Last resort: run in background without nohup
+        "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        PID=$!
+        disown 2>/dev/null || true
+    fi
     
     sleep 3
-    if ps -p $PID > /dev/null 2>&1; then
-        echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
-        notify "normal" "Android Camera" "✅ Active (PID: $PID)"
+    # Check if process is still running
+    if [ ! -z "$PID" ] && command -v ps >/dev/null 2>&1; then
+        if ps -p $PID > /dev/null 2>&1; then
+            echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
+            notify "normal" "Android Camera" "✅ Active (PID: $PID)"
+        else
+                echo -e "${RED}Failed to start.${NC} Check $LOG_FILE"
+            # Show first 5 lines of log file (use sed as fallback if head is not available)
+            if command -v head >/dev/null 2>&1; then
+                head -n 5 "$LOG_FILE" 2>/dev/null || true
+            elif command -v sed >/dev/null 2>&1; then
+                sed -n '1,5p' "$LOG_FILE" 2>/dev/null || true
+            else
+                echo "Log file: $LOG_FILE"
+            fi
+            notify "critical" "Camera Error" "Failed to start. Check logs." "error"
+        fi
     else
-        echo -e "${RED}Failed to start.${NC} Check $LOG_FILE"
-        head -n 5 "$LOG_FILE"
-        notify "critical" "Camera Error" "Failed to start. Check logs." "error"
+        # ps not available, assume it started
+        echo -e "${GREEN}Started (PID: $PID)${NC}"
+        notify "normal" "Android Camera" "✅ Active (PID: $PID)"
     fi
 }
 
 cmd_stop() {
     if is_running; then
-        pkill -f "scrcpy.*video-source=camera"
+        # Stop scrcpy process
+        if command -v pkill >/dev/null 2>&1; then
+            pkill -f "scrcpy.*video-source=camera" 2>/dev/null || true
+        elif command -v ps >/dev/null 2>&1 && command -v kill >/dev/null 2>&1; then
+            # Fallback: find and kill process manually
+            local pid
+            pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | head -n 1)
+            if [ ! -z "$pid" ]; then
+                kill "$pid" 2>/dev/null || true
+            fi
+        else
+            echo -e "${YELLOW}Warning:${NC} Cannot stop process (pkill/ps not available)"
+            return 1
+        fi
         echo -e "${YELLOW}Stopped.${NC}"
         notify "low" "Android Camera" "⏹ Stopped"
     else
@@ -860,8 +906,18 @@ cmd_status() {
     echo -e "--- ${BLUE}Android Camera Status${NC} ---"
     
     if is_running; then
-        PID=$(pgrep -f "scrcpy.*video-source=camera")
-        echo -e "Status: ${GREEN}Active${NC} (PID: $PID)"
+        # Get PID
+        local PID=""
+        if command -v pgrep >/dev/null 2>&1; then
+            PID=$(pgrep -f "scrcpy.*video-source=camera" | head -n 1)
+        elif command -v ps >/dev/null 2>&1 && command -v awk >/dev/null 2>&1; then
+            PID=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | head -n 1)
+        fi
+        if [ ! -z "$PID" ]; then
+            echo -e "Status: ${GREEN}Active${NC} (PID: $PID)"
+        else
+            echo -e "Status: ${GREEN}Active${NC} (PID: unknown)"
+        fi
     else
         echo -e "Status: ${RED}Inactive${NC}"
     fi
@@ -1024,7 +1080,10 @@ Type=Application
 Categories=Utility;Settings;
 EOF
 
-update-desktop-database "$APP_DIR" 2>/dev/null
+# Update desktop database if available
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$APP_DIR" 2>/dev/null || true
+fi
 
 echo -e "\n${BLUE}=========================================${NC}"
 echo -e "${GREEN}   ✨ INSTALLATION COMPLETE! ✨          ${NC}"
