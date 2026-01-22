@@ -487,7 +487,7 @@ if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
                 IFS='.' read -ra ADDR <<< "$IP"
                 valid=true
                 for i in "${ADDR[@]}"; do
-                    if [[ $i -lt 0 || $i -gt 255 ]]; then
+                    if (( 10#$i < 0 || 10#$i > 255 )); then
                         valid=false
                         break
                     fi
@@ -514,7 +514,7 @@ if [ -z "$PHONE_IP" ]; then
             IFS='.' read -ra ADDR <<< "$PHONE_IP"
             valid=true
             for i in "${ADDR[@]}"; do
-                if [[ $i -lt 0 || $i -gt 255 ]]; then
+                if (( 10#$i < 0 || 10#$i > 255 )); then
                     valid=false
                     break
                 fi
@@ -581,7 +581,7 @@ validate_ip() {
         # Check each octet is 0-255
         IFS='.' read -ra ADDR <<< "$ip"
         for i in "${ADDR[@]}"; do
-            if [[ $i -lt 0 || $i -gt 255 ]]; then
+            if (( 10#$i < 0 || 10#$i > 255 )); then
                 return 1
             fi
         done
