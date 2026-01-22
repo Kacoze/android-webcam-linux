@@ -91,8 +91,8 @@ uninstall() {
         DISTRO=$(detect_distro)
         case $DISTRO in
             ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils ;;
-            arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms android-tools ;;
-            fedora) sudo dnf remove -y scrcpy v4l2loopback ;;
+            arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms ;;
+            fedora) sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils ;;
             *) echo "Please remove packages manually for your distro." ;;
         esac
     fi
@@ -449,7 +449,7 @@ PHONE_IP=""
 # Check if awk and cut are available for auto-detection
 if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
     for iface in wlan0 swlan0 wlan1 wlan2; do
-        IP=$(adb shell ip -4 -o addr show $iface 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]')
+        IP=$(adb shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]')
         if [ ! -z "$IP" ]; then
             # Validate IP format
             if [[ "$IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then

@@ -1,7 +1,7 @@
 # 📸 Android Webcam for Linux (Wireless)
 
 Turn your Android phone into a professional HD webcam for Linux.
-**No dedicated apps required on the phone.** This solution relies on system `ADB` and the `scrcpy` engine.
+**No dedicated apps required on the phone.** This solution relies on system ADB and the `scrcpy` engine.
 
 ![Bash](https://img.shields.io/badge/Language-Bash-4EAA25?style=flat-square)
 ![OS](https://img.shields.io/badge/OS-Linux%20(Universal)-orange?style=flat-square)
@@ -185,7 +185,7 @@ sudo apt remove v4l2loopback-dkms v4l2loopback-utils scrcpy
 sudo pacman -Rs v4l2loopback-dkms scrcpy
 
 # Fedora:
-sudo dnf remove v4l2loopback scrcpy
+sudo dnf remove v4l2loopback v4l2loopback-utils scrcpy
 
 # openSUSE:
 sudo zypper remove v4l2loopback-kmp-default v4l2loopback-utils scrcpy
