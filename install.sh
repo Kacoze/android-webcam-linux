@@ -140,8 +140,8 @@ install_deps() {
         ubuntu|debian|pop|linuxmint|kali|neon|zorin)
             log_info "Using APT..."
             sudo apt update
-            DEPS="android-tools-adb v4l2loopback-dkms v4l2loopback-utils ffmpeg libnotify-bin"
-            sudo apt install -y $DEPS
+            DEPS=("android-tools-adb" "v4l2loopback-dkms" "v4l2loopback-utils" "ffmpeg" "libnotify-bin")
+            sudo apt install -y "${DEPS[@]}"
             ;;
         arch|manjaro|endeavouros|garuda)
             log_info "Using PACMAN..."
@@ -188,7 +188,11 @@ check_scrcpy_version() {
         return
     fi
     # Extract version using sed (more portable than grep -P)
-    echo "$version_output" | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0"
+    if command -v head >/dev/null 2>&1; then
+        echo "$version_output" | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0"
+    else
+        echo "$version_output" | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "0.0"
+    fi
 }
 
 version_compare() {
@@ -200,7 +204,11 @@ version_compare() {
     # Compare versions using sort -V: check if current >= required
     # If required is the first (smallest) when sorted, then current >= required
     local sorted
-    sorted=$(printf '%s\n' "$required" "$current" | sort -V | head -n1)
+    if command -v head >/dev/null 2>&1; then
+        sorted=$(printf '%s\n' "$required" "$current" | sort -V | head -n 1)
+    else
+        sorted=$(printf '%s\n' "$required" "$current" | sort -V | sed -n '1p')
+    fi
     [ "$sorted" = "$required" ]
 }
 
@@ -275,7 +283,11 @@ ensure_scrcpy() {
             if flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
                 scrcpy_bin="flatpak run org.scrcpy.ScrCpy"
                 # Flatpak version check
-                current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0")
+                if command -v head >/dev/null 2>&1; then
+                    current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0")
+                else
+                    current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "0.0")
+                fi
                 if version_compare "$REQUIRED_VER" "$current_ver"; then
                     trap - INT TERM EXIT  # Remove trap before return
                     log_success "Installed scrcpy v$current_ver via Flatpak"
@@ -312,10 +324,18 @@ ensure_scrcpy() {
         # Use sed as fallback if grep -o is not available
         local latest_url
         if echo "test" | grep -o "test" >/dev/null 2>&1; then
-            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | head -n 1)
+            if command -v head >/dev/null 2>&1; then
+                latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | head -n 1)
+            else
+                latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | sed -n '1p')
+            fi
         else
             # Fallback using sed (more portable)
-            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | head -n 1)
+            if command -v head >/dev/null 2>&1; then
+                latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | head -n 1)
+            else
+                latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | sed -n '1p')
+            fi
         fi
         
         if [ ! -z "$latest_url" ]; then
@@ -337,7 +357,11 @@ ensure_scrcpy() {
                     elif tar -xf "$temp_file" -C "$extract_dir" 2>/dev/null; then
                         # Find scrcpy binary in extracted directory
                         local found_bin
-                        found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | head -n 1)
+                        if command -v head >/dev/null 2>&1; then
+                            found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | head -n 1)
+                        else
+                            found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | sed -n '1p')
+                        fi
                         if [ ! -z "$found_bin" ]; then
                             if ! cp "$found_bin" "$download_dir/scrcpy" 2>/dev/null; then
                                 log_warn "Failed to copy scrcpy binary, skipping..."
@@ -840,7 +864,7 @@ cmd_start() {
     sleep 3
     # Check if process is still running
     if [ ! -z "$PID" ] && command -v ps >/dev/null 2>&1; then
-        if ps -p $PID > /dev/null 2>&1; then
+        if ps -p "$PID" > /dev/null 2>&1; then
             echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
             notify "normal" "Android Camera" "✅ Active (PID: $PID)"
         else
@@ -1085,7 +1109,7 @@ cat << EOF > "$APP_DIR/android-cam.desktop"
 Version=1.0
 Name=Camera Phone
 Comment=Toggle Android Camera
-Exec=$BIN_DIR/android-webcam-ctl toggle
+Exec="$BIN_DIR/android-webcam-ctl" toggle
 Icon=camera-web
 Terminal=false
 Type=Application
@@ -1094,17 +1118,17 @@ Actions=Status;Config;Fix;
 
 [Desktop Action Status]
 Name=Check Status
-Exec=bash -c "$BIN_DIR/android-webcam-ctl status; read -p 'Press Enter...' "
+Exec=bash -c "\"$BIN_DIR/android-webcam-ctl\" status; read -p 'Press Enter...' "
 Terminal=true
 
 [Desktop Action Config]
 Name=Settings
-Exec=$BIN_DIR/android-webcam-ctl config
+Exec="$BIN_DIR/android-webcam-ctl" config
 Terminal=true
 
 [Desktop Action Fix]
 Name=Fix Connection (USB)
-Exec=$BIN_DIR/android-webcam-ctl fix
+Exec="$BIN_DIR/android-webcam-ctl" fix
 Terminal=true
 EOF
 
@@ -1114,7 +1138,7 @@ cat << EOF > "$APP_DIR/android-cam-fix.desktop"
 Version=1.0
 Name=Fix Camera (USB)
 Comment=Reconnect after restart
-Exec=$BIN_DIR/android-webcam-ctl fix
+Exec="$BIN_DIR/android-webcam-ctl" fix
 Icon=smartphone
 Terminal=true
 Type=Application

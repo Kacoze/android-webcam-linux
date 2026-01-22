@@ -137,15 +137,21 @@ sudo modprobe v4l2loopback
 If this fails, you may have Secure Boot enabled. Either disable Secure Boot in BIOS or sign the kernel module.
 
 **I changed my router / network, what to do?**
-If the phone's IP address changed, run:
-```bash
-android-webcam-ctl config
-```
-and update the line:
-```bash
-PHONE_IP="192.168.1.50"  # Replace with your new phone IP
-```
-Or simply run the installer again to auto-detect the new IP.
+If the phone's IP address changed, you can either:
+
+1. Run the installer again to auto-detect the new IP.
+2. Edit the config file manually:
+   ```bash
+   nano ~/.config/android-webcam/settings.conf
+   ```
+   and update the line:
+   ```bash
+   PHONE_IP="192.168.1.50"  # Replace with your new phone IP
+   ```
+3. Or use the config command:
+   ```bash
+   android-webcam-ctl config
+   ```
 
 ---
 
