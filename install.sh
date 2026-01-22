@@ -124,7 +124,12 @@ check_path
 
 DISTRO=$(detect_distro)
 # Capitalize first letter (compatible with both GNU sed and BSD sed)
-DISTRO_CAPITALIZED=$(echo "$DISTRO" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+if command -v awk >/dev/null 2>&1; then
+    DISTRO_CAPITALIZED=$(echo "$DISTRO" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+else
+    # Fallback: capitalize first letter using sed
+    DISTRO_CAPITALIZED=$(echo "$DISTRO" | sed 's/^./\U&/')
+fi
 echo -e "Detected System: ${BLUE}${DISTRO_CAPITALIZED}${NC}"
 
 # --- STEP 1: DEPENDENCIES ---
@@ -865,7 +870,20 @@ cmd_stop() {
         elif command -v ps >/dev/null 2>&1 && command -v kill >/dev/null 2>&1; then
             # Fallback: find and kill process manually
             local pid
-            pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | head -n 1)
+            if command -v awk >/dev/null 2>&1; then
+                if command -v head >/dev/null 2>&1; then
+                    pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | head -n 1)
+                else
+                    pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | sed -n '1p')
+                fi
+            else
+                # Fallback: extract PID using cut
+                if command -v head >/dev/null 2>&1; then
+                    pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | tr -s ' ' | cut -d' ' -f2 | head -n 1)
+                else
+                    pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | tr -s ' ' | cut -d' ' -f2 | sed -n '1p')
+                fi
+            fi
             if [ ! -z "$pid" ]; then
                 kill "$pid" 2>/dev/null || true
             fi
@@ -927,9 +945,17 @@ cmd_status() {
         # Get PID
         local PID=""
         if command -v pgrep >/dev/null 2>&1; then
-            PID=$(pgrep -f "scrcpy.*video-source=camera" | head -n 1)
+            if command -v head >/dev/null 2>&1; then
+                PID=$(pgrep -f "scrcpy.*video-source=camera" | head -n 1)
+            else
+                PID=$(pgrep -f "scrcpy.*video-source=camera" | sed -n '1p')
+            fi
         elif command -v ps >/dev/null 2>&1 && command -v awk >/dev/null 2>&1; then
-            PID=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | head -n 1)
+            if command -v head >/dev/null 2>&1; then
+                PID=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | head -n 1)
+            else
+                PID=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | sed -n '1p')
+            fi
         fi
         if [ ! -z "$PID" ]; then
             echo -e "Status: ${GREEN}Active${NC} (PID: $PID)"

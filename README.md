@@ -105,6 +105,7 @@ android-webcam-ctl config
 File location: `~/.config/android-webcam/settings.conf`
 
 ```bash
+PHONE_IP="192.168.1.50"   # Your phone's Wi-Fi IP address
 CAMERA_FACING="back"      # Options: front, back, external
 VIDEO_SIZE=""             # Max dimension in pixels (e.g., "1080" for 1080p), leave empty for max resolution
 BIT_RATE="8M"             # Higher = better quality, more latency
