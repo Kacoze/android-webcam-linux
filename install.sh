@@ -8,7 +8,7 @@
 # =============================================================================
 
 # --- CONSTANTS & COLORS ---
-readonly VERSION="2.1.0"
+readonly VERSION="2.2.0"
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
 readonly RED='\033[0;31m'
@@ -48,11 +48,9 @@ detect_distro() {
 check_path() {
     if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
         log_warn "Your ~/.local/bin is NOT in your \$PATH."
-        echo "The script will install correctly, but commands might not run globally."
-        echo "Recommend adding this to ~/.bashrc or ~/.zshrc:"
+        echo -e "Required for execution. Please add this to your shell config:"
         echo -e "${YELLOW}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
-        echo "Continuing in 3 seconds..."
-        sleep 3
+        sleep 2
     fi
 }
 
@@ -66,19 +64,21 @@ uninstall() {
     fi
     
     log_info "Removing files..."
-    rm -rf "$HOME/.local/bin/android-cam-toggle.sh"
-    rm -rf "$HOME/.local/bin/android-cam-fix.sh"
+    rm -f "$HOME/.local/bin/android-webcam-ctl"
+    rm -f "$HOME/.local/bin/android-cam-toggle.sh" # cleanup legacy
+    rm -f "$HOME/.local/bin/android-cam-fix.sh"    # cleanup legacy
     rm -rf "$HOME/.config/android-webcam"
-    rm -rf "$HOME/.local/share/applications/android-cam.desktop"
-    rm -rf "$HOME/.local/share/applications/android-cam-fix.desktop"
+    rm -f "$HOME/.local/share/applications/android-cam.desktop"
+    rm -f "$HOME/.local/share/applications/android-cam-fix.desktop"
+    
+    log_success "Files removed."
     
     echo "Do you want to remove system dependencies (scrcpy, v4l2loopback etc.)?"
-    echo "Only say YES if you don't use them for other things."
     read -p "Remove packages? (y/N): " pkg_confirm
     if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
         DISTRO=$(detect_distro)
         case $DISTRO in
-            ubuntu|debian|pop|linuxmint|zorin) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils android-tools-adb ;;
+            ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils android-tools-adb ;;
             arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms android-tools ;;
             fedora) sudo dnf remove -y scrcpy v4l2loopback ;;
             *) echo "Please remove packages manually for your distro." ;;
@@ -126,15 +126,12 @@ install_deps() {
             ;;
         arch|manjaro|endeavouros|garuda)
             log_info "Using PACMAN..."
-            log_warn "Arch users: Ensure you have headers installed (linux-headers / linux-zen-headers) matching your kernel!"
             sudo pacman -Sy --needed android-tools v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg libnotify
             ;;
         fedora|rhel|centos|nobara)
             log_info "Using DNF..."
-            # Check for RPMFusion (needed for v4l2loopback)
             if ! dnf repolist | grep -q "rpmfusion"; then
                 log_warn "Fedora requires RPMFusion for v4l2loopback."
-                echo "Please enable RPMFusion Free and Non-Free repositories."
                 read -p "Press Enter to try installing anyway (might fail)..."
             fi
             sudo dnf install -y android-tools v4l2loopback v4l2loopback-utils scrcpy ffmpeg libnotify
@@ -152,11 +149,10 @@ install_deps() {
 }
 
 if ! install_deps; then
-    log_error "Dependency installation failed."
-    exit 1
+    log_warn "Dependency installation had issues. Trying to proceed..."
 fi
 
-# --- STEP 1.5: SCRCPY VERSION CHECK ---
+# --- STEP 1.5: SCRCPY CHECK ---
 echo -e "\n${GREEN}[Check] Verifying scrcpy version...${NC}"
 
 check_scrcpy() {
@@ -167,22 +163,15 @@ check_scrcpy() {
 CURRENT_VER=$(check_scrcpy)
 REQUIRED_VER="2.0"
 
-# Compare version logic
 if [ "$(printf '%s\n' "$REQUIRED_VER" "$CURRENT_VER" | sort -V | head -n1)" = "$CURRENT_VER" ] && [ "$CURRENT_VER" != "$REQUIRED_VER" ]; then
     log_warn "Scrcpy v$CURRENT_VER is too old (Need v$REQUIRED_VER+)."
-    
     if command -v snap &> /dev/null; then
-        log_info "Attempting upgrade via Snap..."
-        # Clean up apt version to prevent conflicts
-        [[ "$DISTRO" =~ (ubuntu|debian|mint|pop|zorin) ]] && sudo apt remove -y scrcpy 2>/dev/null
-        
+        log_info "Installing via Snap..."
         sudo snap install scrcpy
         sudo snap connect scrcpy:camera
         sudo snap connect scrcpy:raw-usb
-        log_success "Scrcpy installed via Snap."
     else
-        log_error "Manual update required. Install scrcpy 2.0+ from GitHub."
-        read -p "Press Enter to continue at your own risk (Camera might not work)..."
+        log_warn "Please manually update scrcpy to v2.0+ for camera support."
     fi
 else
     log_success "Scrcpy v$CURRENT_VER is compatible."
@@ -204,10 +193,8 @@ if ! grep -q "Android Cam" "$CONF_FILE" 2>/dev/null; then
     if sudo modprobe v4l2loopback; then
         log_success "Module loaded."
     else
-        log_error "Failed to load module."
-        echo -e "${YELLOW}Possible cause: Secure Boot is enabled.${NC}"
-        echo "If so, you need to sign the module or disable Secure Boot in BIOS."
-        echo "Or simply REBOOT your computer and try again."
+        log_error "Failed to load module (Secure Boot?)."
+        echo "Try rebooting your system."
     fi
 else
     log_success "Module check passed."
@@ -215,19 +202,18 @@ fi
 
 # --- STEP 3: PHONE PAIRING ---
 echo -e "\n${GREEN}[3/5] Pairing Phone...${NC}"
+
 echo "---------------------------------------------------"
 echo " 1. USB Connection: YES (Connect cable now)"
 echo " 2. USB Debugging:  ENABLED (In Developer Options)"
 echo " 3. RSA Prompt:     ACCEPTED (On phone screen)"
 echo "---------------------------------------------------"
-log_info "Waiting for device (Ctrl+C to cancel)..."
-
+log_info "Waiting for device..."
 adb wait-for-usb-device
 
 log_success "Device connected!"
 log_info "Detecting Wi-Fi IP address..."
 
-# Smart Loop for Interface Detection
 PHONE_IP=""
 for iface in wlan0 swlan0 wlan1 wlan2 eth0; do
     IP=$(adb shell ip -4 -o addr show $iface 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
@@ -240,103 +226,304 @@ done
 
 if [ -z "$PHONE_IP" ]; then
     log_warn "Could not auto-detect Wi-Fi IP."
-    echo "Make sure the phone is connected to the same Wi-Fi network."
     read -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
 fi
 
-# Save config
-CONFIG_DIR="$HOME/.config/android-webcam"
-mkdir -p "$CONFIG_DIR"
-echo "PHONE_IP=$PHONE_IP:5555" > "$CONFIG_DIR/config.env"
-
-log_info "Enabling TCP/IP mode..."
+# Enable TCP/IP
 adb tcpip 5555
-sleep 3
+sleep 2
 
-# --- STEP 4: SCRIPTS ---
-echo -e "\n${GREEN}[4/5] Generating Control Scripts...${NC}"
+# --- STEP 4: INSTALLING SCRIPTS ---
+echo -e "\n${GREEN}[4/5] Installing Control Scripts...${NC}"
+
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 
-# -- TOGGLE SCRIPT --
-cat << 'EOF' > "$BIN_DIR/android-cam-toggle.sh"
+log_info "Installing android-webcam-ctl to $BIN_DIR..."
+
+cat << 'EOF' > "$BIN_DIR/android-webcam-ctl"
 #!/bin/bash
-source ~/.config/android-webcam/config.env
-LOG="/tmp/android-cam.log"
+# android-webcam-ctl
+# Central control script for Android Webcam on Linux
 
-# Check if running
-if pgrep -f "scrcpy.*video-source=camera" > /dev/null; then
-    pkill -f "scrcpy.*video-source=camera"
-    notify-send -u low -i camera-web "Android Camera" "⏹ Stopped"
-    exit 0
-fi
+CONFIG_DIR="$HOME/.config/android-webcam"
+CONFIG_FILE="$CONFIG_DIR/settings.conf"
+LOG_FILE="/tmp/android-cam.log"
 
-notify-send -u low -i camera-web "Android Camera" "⌛ Connecting..."
+# Default configuration values
+DEFAULT_CAMERA_FACING="back" # front, back, external
+DEFAULT_VIDEO_SIZE=""        # e.g. 1920x1080 (empty = max supported)
+DEFAULT_BIT_RATE="8M"
+DEFAULT_ARGS="--no-audio --buffer=400"
 
-# Try silent reconnect
-adb connect $PHONE_IP > /dev/null
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# Determine binary path
-SCRCPY_BIN=$(command -v scrcpy)
-if [ -z "$SCRCPY_BIN" ] && [ -f /snap/bin/scrcpy ]; then
-    SCRCPY_BIN="/snap/bin/scrcpy"
-fi
+# --- Config Management ---
 
-# Launch
-nohup $SCRCPY_BIN -s $PHONE_IP --video-source=camera --camera-facing=front --v4l2-sink=/dev/video0 --no-audio > "$LOG" 2>&1 &
-PID=$!
+load_config() {
+    # Ensure config dir exists
+    mkdir -p "$CONFIG_DIR"
+    
+    # Migration from v2.0 (config.env) if settings.conf missing
+    if [ ! -f "$CONFIG_FILE" ] && [ -f "$CONFIG_DIR/config.env" ]; then
+        source "$CONFIG_DIR/config.env"
+        # Extract IP from OLD format (IP:PORT)
+        CLEAN_IP=$(echo "$PHONE_IP" | cut -d: -f1)
+        
+        # Write new config
+        cat << END_CONF > "$CONFIG_FILE"
+# Android Webcam Configuration
+PHONE_IP="$CLEAN_IP"
+CAMERA_FACING="$DEFAULT_CAMERA_FACING"
+VIDEO_SIZE="$DEFAULT_VIDEO_SIZE"
+BIT_RATE="$DEFAULT_BIT_RATE"
+EXTRA_ARGS="$DEFAULT_ARGS"
+END_CONF
+    fi
+    
+    # Create default if nothing exists
+    if [ ! -f "$CONFIG_FILE" ]; then
+        cat << END_CONF > "$CONFIG_FILE"
+# Android Webcam Configuration
+PHONE_IP=""
+CAMERA_FACING="$DEFAULT_CAMERA_FACING"
+VIDEO_SIZE="$DEFAULT_VIDEO_SIZE"
+BIT_RATE="$DEFAULT_BIT_RATE"
+EXTRA_ARGS="$DEFAULT_ARGS"
+END_CONF
+    fi
 
-sleep 3
-if ps -p $PID > /dev/null; then
-    notify-send -u normal -i camera-web "Android Camera" "✅ Active (PID: $PID)"
+    source "$CONFIG_FILE"
+}
+
+# --- Helpers ---
+
+notify() {
+    local level="$1"
+    local title="$2"
+    local msg="$3"
+    local icon="$4"
+    if [ -z "$icon" ]; then icon="camera-web"; fi
+    notify-send -u "$level" -i "$icon" "$title" "$msg"
+}
+
+is_running() {
+    pgrep -f "scrcpy.*video-source=camera" > /dev/null
+}
+
+find_scrcpy() {
+    if command -v scrcpy >/dev/null; then
+        echo "$(command -v scrcpy)"
+    elif [ -f /snap/bin/scrcpy ]; then
+        echo "/snap/bin/scrcpy"
+    else
+        return 1
+    fi
+}
+
+# --- Commands ---
+
+cmd_start() {
+    load_config
+    
+    if is_running; then
+        echo "Camera is already active."
+        notify "low" "Android Camera" "Already active"
+        return 0
+    fi
+    
+    if [ -z "$PHONE_IP" ]; then
+        echo -e "${RED}Error:${NC} PHONE_IP not set. Run '$0 config' to edit settings."
+        notify "critical" "Android Camera" "Config Error: No IP set" "error"
+        return 1
+    fi
+
+    echo -e "${BLUE}Connecting to $PHONE_IP...${NC}"
+    notify "normal" "Android Camera" "⌛ Connecting..."
+
+    # Connection attempt
+    adb connect "$PHONE_IP:5555" > /dev/null
+    
+    SCRCPY_BIN=$(find_scrcpy)
+    if [ -z "$SCRCPY_BIN" ]; then
+        echo -e "${RED}Error:${NC} scrcpy not found!"
+        notify "critical" "Android Camera" "Error: scrcpy not found" "error"
+        return 1
+    fi
+
+    # Construct the command
+    CMD=("$SCRCPY_BIN")
+    CMD+=("-s" "$PHONE_IP:5555")
+    CMD+=("--video-source=camera")
+    CMD+=("--camera-facing=$CAMERA_FACING")
+    
+    if [ ! -z "$VIDEO_SIZE" ]; then
+        CMD+=("--max-size=$VIDEO_SIZE")
+    fi
+    
+    if [ ! -z "$BIT_RATE" ]; then
+        CMD+=("--video-bit-rate=$BIT_RATE")
+    fi
+    
+    CMD+=("--v4l2-sink=/dev/video0")
+    
+    # Split EXTRA_ARGS string into array
+    IFS=' ' read -r -a EXTRA_ARGS_ARRAY <<< "$EXTRA_ARGS"
+    CMD+=("${EXTRA_ARGS_ARRAY[@]}")
+
+    echo "Executing: ${CMD[*]}"
+    
+    # Run in background
+    nohup "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+    PID=$!
+    
+    sleep 3
+    if ps -p $PID > /dev/null; then
+        echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
+        notify "normal" "Android Camera" "✅ Active (PID: $PID)"
+    else
+        echo -e "${RED}Failed to start.${NC} Check $LOG_FILE"
+        head -n 5 "$LOG_FILE"
+        notify "critical" "Camera Error" "Failed to start. Check logs." "error"
+    fi
+}
+
+cmd_stop() {
+    if is_running; then
+        pkill -f "scrcpy.*video-source=camera"
+        echo -e "${YELLOW}Stopped.${NC}"
+        notify "low" "Android Camera" "⏹ Stopped"
+    else
+        echo "Not running."
+    fi
+}
+
+cmd_toggle() {
+    if is_running; then
+        cmd_stop
+    else
+        cmd_start
+    fi
+}
+
+cmd_fix() {
+    notify-send -i smartphone "Camera Setup" "🔌 Connect USB Cable..." "smartphone"
+    echo -e "${BLUE}Waiting for USB device...${NC}"
+    adb wait-for-usb-device
+    echo "Device connected. Enabling TCP/IP mode..."
+    adb tcpip 5555
+    echo -e "${GREEN}Done! You can disconnect USB now.${NC}"
+    notify-send -i smartphone "Camera Setup" "✅ Fixed! Unplug USB." "smartphone"
+}
+
+cmd_status() {
+    load_config
+    echo -e "--- ${BLUE}Android Camera Status${NC} ---"
+    
+    if is_running; then
+        PID=$(pgrep -f "scrcpy.*video-source=camera")
+        echo -e "Status: ${GREEN}Active${NC} (PID: $PID)"
+    else
+        echo -e "Status: ${RED}Inactive${NC}"
+    fi
+    
+    echo ""
+    echo -e "--- ${BLUE}Configuration${NC} ---"
+    echo "File: $CONFIG_FILE"
+    echo "Phone IP:       ${PHONE_IP:-[Not Set]}"
+    echo "Camera Facing:  $CAMERA_FACING"
+    echo "Video Size:     ${VIDEO_SIZE:-Max}"
+    echo "Bitrate:        $BIT_RATE"
+}
+
+cmd_config() {
+    load_config
+    EDITOR=${EDITOR:-nano}
+    $EDITOR "$CONFIG_FILE"
+}
+
+# --- Main ---
+
+case "$1" in
+    start)  cmd_start ;;
+    stop)   cmd_stop ;;
+    toggle) cmd_toggle ;;
+    fix)    cmd_fix ;;
+    status) cmd_status ;;
+    config) cmd_config ;;
+    *)
+        echo "Usage: $0 {start|stop|toggle|fix|status|config}"
+        exit 1
+        ;;
+esac
+EOF
+
+chmod +x "$BIN_DIR/android-webcam-ctl"
+
+# Generate Config
+CONFIG_DIR="$HOME/.config/android-webcam"
+CONFIG_FILE="$CONFIG_DIR/settings.conf"
+mkdir -p "$CONFIG_DIR"
+
+# Only create if doesn't exist to respect user edits on re-install
+if [ ! -f "$CONFIG_FILE" ]; then
+    log_info "Creating initial configuration..."
+    cat << EOF > "$CONFIG_FILE"
+# Android Webcam Configuration
+PHONE_IP="$PHONE_IP"
+CAMERA_FACING="back"
+VIDEO_SIZE=""
+BIT_RATE="8M"
+EXTRA_ARGS="--no-audio --buffer=400"
+EOF
 else
-    ERR=$(head -n 2 "$LOG")
-    notify-send -u critical -i error "Camera Error" "Failed to start"
+    log_info "Updating IP in existing config..."
+    sed -i "s/PHONE_IP=.*/PHONE_IP=\"$PHONE_IP\"/" "$CONFIG_FILE"
 fi
-EOF
-
-# -- FIX SCRIPT --
-cat << 'EOF' > "$BIN_DIR/android-cam-fix.sh"
-#!/bin/bash
-notify-send -i smartphone "Camera Setup" "🔌 Connect USB Cable..."
-adb wait-for-usb-device
-adb tcpip 5555
-notify-send -i smartphone "Camera Setup" "✅ Fixed! Unplug USB."
-EOF
-
-chmod +x "$BIN_DIR/android-cam-toggle.sh"
-chmod +x "$BIN_DIR/android-cam-fix.sh"
 
 # --- STEP 5: ICONS ---
 echo -e "\n${GREEN}[5/5] Creating Launcher Icons...${NC}"
 APP_DIR="$HOME/.local/share/applications"
 mkdir -p "$APP_DIR"
 
-# Main Icon with Right-Click Action
 cat << EOF > "$APP_DIR/android-cam.desktop"
 [Desktop Entry]
 Version=1.0
 Name=Camera Phone
 Comment=Toggle Android Camera
-Exec=$BIN_DIR/android-cam-toggle.sh
+Exec=$BIN_DIR/android-webcam-ctl toggle
 Icon=camera-web
 Terminal=false
 Type=Application
 Categories=Utility;Video;
-Actions=Fix;
+Actions=Status;Config;Fix;
+
+[Desktop Action Status]
+Name=Check Status
+Exec=bash -c "$BIN_DIR/android-webcam-ctl status; read -p 'Press Enter...' "
+Terminal=true
+
+[Desktop Action Config]
+Name=Settings
+Exec=$BIN_DIR/android-webcam-ctl config
 
 [Desktop Action Fix]
 Name=Fix Connection (USB)
-Exec=$BIN_DIR/android-cam-fix.sh
+Exec=$BIN_DIR/android-webcam-ctl fix
 EOF
 
-# Separate Fix Icon (Optional but kept for compatibility)
+# Separate Fix Icon (Optional but useful)
 cat << EOF > "$APP_DIR/android-cam-fix.desktop"
 [Desktop Entry]
 Version=1.0
 Name=Fix Camera (USB)
 Comment=Reconnect after restart
-Exec=$BIN_DIR/android-cam-fix.sh
+Exec=$BIN_DIR/android-webcam-ctl fix
 Icon=smartphone
 Terminal=false
 Type=Application
@@ -350,6 +537,5 @@ echo -e "${GREEN}   ✨ INSTALLATION COMPLETE! ✨          ${NC}"
 echo -e "${BLUE}=========================================${NC}"
 echo "1. Unplug USB Cable."
 echo "2. Use 'Camera Phone' icon to toggle webcam."
-echo "3. If it fails, use 'Fix Camera (USB)'."
+echo "3. Run 'android-webcam-ctl config' to change settings."
 echo ""
-echo -e "To uninstall, run: ${YELLOW}./install.sh --uninstall${NC}"
