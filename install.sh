@@ -152,31 +152,158 @@ if ! install_deps; then
     log_warn "Dependency installation had issues. Trying to proceed..."
 fi
 
-# --- STEP 1.5: SCRCPY CHECK ---
-echo -e "\n${GREEN}[Check] Verifying scrcpy version...${NC}"
+# --- STEP 1.5: SCRCPY INSTALLATION ---
+echo -e "\n${GREEN}[Check] Ensuring scrcpy >= 2.0 is available...${NC}"
 
-check_scrcpy() {
-    if ! command -v scrcpy &> /dev/null; then echo "0.0"; return; fi
-    # More reliable version parsing
-    scrcpy --version 2>/dev/null | grep -oP '\d+\.\d+(\.\d+)?' | head -n 1 || echo "0.0"
+check_scrcpy_version() {
+    local scrcpy_bin="$1"
+    if [ -z "$scrcpy_bin" ] || [ ! -x "$scrcpy_bin" ]; then
+        echo "0.0"
+        return
+    fi
+    # Portable version parsing (works without grep -P)
+    local version_output
+    version_output=$("$scrcpy_bin" --version 2>/dev/null || echo "")
+    if [ -z "$version_output" ]; then
+        echo "0.0"
+        return
+    fi
+    # Extract version using sed (more portable than grep -P)
+    echo "$version_output" | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0"
 }
 
-CURRENT_VER=$(check_scrcpy)
-REQUIRED_VER="2.0"
-
-if [ "$(printf '%s\n' "$REQUIRED_VER" "$CURRENT_VER" | sort -V | head -n1)" = "$CURRENT_VER" ] && [ "$CURRENT_VER" != "$REQUIRED_VER" ]; then
-    log_warn "Scrcpy v$CURRENT_VER is too old (Need v$REQUIRED_VER+)."
-    if command -v snap &> /dev/null; then
-        log_info "Installing via Snap..."
-        sudo snap install scrcpy
-        sudo snap connect scrcpy:camera
-        sudo snap connect scrcpy:raw-usb
-    else
-        log_warn "Please manually update scrcpy to v2.0+ for camera support."
+version_compare() {
+    local required="$1"
+    local current="$2"
+    if [ "$current" = "0.0" ]; then
+        return 1
     fi
-else
-    log_success "Scrcpy v$CURRENT_VER is compatible."
-fi
+    # Compare versions using sort -V
+    local result
+    result=$(printf '%s\n' "$required" "$current" | sort -V | head -n1)
+    [ "$result" = "$required" ] || [ "$result" = "$current" ] && [ "$current" != "$required" ] && [ "$(printf '%s\n' "$required" "$current" | sort -V | tail -n1)" = "$current" ]
+}
+
+ensure_scrcpy() {
+    local REQUIRED_VER="2.0"
+    local scrcpy_bin=""
+    local current_ver="0.0"
+    
+    # Check if scrcpy already exists and is compatible
+    if command -v scrcpy >/dev/null 2>&1; then
+        scrcpy_bin=$(command -v scrcpy)
+        current_ver=$(check_scrcpy_version "$scrcpy_bin")
+        if version_compare "$REQUIRED_VER" "$current_ver"; then
+            log_success "Found compatible scrcpy v$current_ver at $scrcpy_bin"
+            return 0
+        else
+            log_warn "Existing scrcpy v$current_ver is too old (need v$REQUIRED_VER+)"
+        fi
+    fi
+    
+    # Check snap version
+    if [ -f /snap/bin/scrcpy ]; then
+        scrcpy_bin="/snap/bin/scrcpy"
+        current_ver=$(check_scrcpy_version "$scrcpy_bin")
+        if version_compare "$REQUIRED_VER" "$current_ver"; then
+            log_success "Found compatible scrcpy v$current_ver (snap)"
+            return 0
+        fi
+    fi
+    
+    # Try installing via Snap
+    if command -v snap >/dev/null 2>&1; then
+        log_info "Attempting to install scrcpy via Snap..."
+        if sudo snap install scrcpy 2>/dev/null; then
+            sudo snap connect scrcpy:camera 2>/dev/null
+            sudo snap connect scrcpy:raw-usb 2>/dev/null
+            sleep 2
+            if [ -f /snap/bin/scrcpy ]; then
+                scrcpy_bin="/snap/bin/scrcpy"
+                current_ver=$(check_scrcpy_version "$scrcpy_bin")
+                if version_compare "$REQUIRED_VER" "$current_ver"; then
+                    log_success "Installed scrcpy v$current_ver via Snap"
+                    return 0
+                fi
+            fi
+        fi
+    fi
+    
+    # Try installing via Flatpak
+    if command -v flatpak >/dev/null 2>&1; then
+        log_info "Attempting to install scrcpy via Flatpak..."
+        if flatpak install -y flathub org.scrcpy.ScrCpy 2>/dev/null; then
+            scrcpy_bin="flatpak run org.scrcpy.ScrCpy"
+            # Flatpak version check
+            current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0")
+            if version_compare "$REQUIRED_VER" "$current_ver"; then
+                log_success "Installed scrcpy v$current_ver via Flatpak"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Try downloading from GitHub Releases
+    log_info "Attempting to download scrcpy from GitHub Releases..."
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="x86_64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        armv7l|armv6l) arch="armv7" ;;
+        *) arch="x86_64" ;; # fallback
+    esac
+    
+    local download_dir="$HOME/.local/bin"
+    mkdir -p "$download_dir"
+    
+    # Get latest release URL
+    local latest_url
+    latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | head -n 1)
+    
+    if [ ! -z "$latest_url" ]; then
+        log_info "Downloading scrcpy from GitHub..."
+        local temp_file
+        temp_file=$(mktemp)
+        if curl -L -f -s "$latest_url" -o "$temp_file" 2>/dev/null; then
+            local extract_dir
+            extract_dir=$(mktemp -d)
+            if tar -xf "$temp_file" -C "$extract_dir" 2>/dev/null; then
+                # Find scrcpy binary in extracted directory
+                local found_bin
+                found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | head -n 1)
+                if [ ! -z "$found_bin" ]; then
+                    cp "$found_bin" "$download_dir/scrcpy" 2>/dev/null
+                    chmod +x "$download_dir/scrcpy"
+                    rm -rf "$extract_dir"
+                    rm -f "$temp_file"
+                    
+                    scrcpy_bin="$download_dir/scrcpy"
+                    current_ver=$(check_scrcpy_version "$scrcpy_bin")
+                    if version_compare "$REQUIRED_VER" "$current_ver"; then
+                        log_success "Downloaded and installed scrcpy v$current_ver to $download_dir"
+                        return 0
+                    fi
+                fi
+                rm -rf "$extract_dir"
+            fi
+            rm -f "$temp_file"
+        fi
+    fi
+    
+    # If we get here, nothing worked
+    log_error "Failed to install scrcpy >= v$REQUIRED_VER"
+    echo ""
+    echo "Please install scrcpy manually:"
+    echo "  - Snap: sudo snap install scrcpy"
+    echo "  - Flatpak: flatpak install flathub org.scrcpy.ScrCpy"
+    echo "  - Or download from: https://github.com/Genymobile/scrcpy/releases"
+    echo ""
+    read -p "Press Enter to continue anyway (camera may not work)..."
+    return 1
+}
+
+ensure_scrcpy
 
 # --- STEP 2: KERNEL MODULE ---
 echo -e "\n${GREEN}[2/5] Configuring V4L2 Module...${NC}"
@@ -299,7 +426,7 @@ LOG_FILE="/tmp/android-cam.log"
 
 # Default configuration values
 DEFAULT_CAMERA_FACING="back" # front, back, external
-DEFAULT_VIDEO_SIZE=""        # e.g. 1920x1080 (empty = max supported)
+DEFAULT_VIDEO_SIZE=""        # e.g. 1080 (max dimension in pixels, empty = max supported)
 DEFAULT_BIT_RATE="8M"
 DEFAULT_ARGS="--no-audio --buffer=400"
 
@@ -343,7 +470,18 @@ check_dependencies() {
         missing+=("adb")
     fi
     
-    if ! command -v scrcpy >/dev/null 2>&1 && [ ! -f /snap/bin/scrcpy ]; then
+    local scrcpy_found=false
+    if command -v scrcpy >/dev/null 2>&1; then
+        scrcpy_found=true
+    elif [ -f /snap/bin/scrcpy ]; then
+        scrcpy_found=true
+    elif [ -f "$HOME/.local/bin/scrcpy" ]; then
+        scrcpy_found=true
+    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+        scrcpy_found=true
+    fi
+    
+    if [ "$scrcpy_found" = false ]; then
         missing+=("scrcpy")
     fi
     
@@ -409,10 +547,14 @@ is_running() {
 }
 
 find_scrcpy() {
-    if command -v scrcpy >/dev/null; then
+    if command -v scrcpy >/dev/null 2>&1; then
         echo "$(command -v scrcpy)"
     elif [ -f /snap/bin/scrcpy ]; then
         echo "/snap/bin/scrcpy"
+    elif [ -f "$HOME/.local/bin/scrcpy" ]; then
+        echo "$HOME/.local/bin/scrcpy"
+    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app | grep -q org.scrcpy.ScrCpy; then
+        echo "flatpak run org.scrcpy.ScrCpy"
     else
         return 1
     fi
@@ -466,20 +608,45 @@ cmd_start() {
     fi
 
     # Construct the command
-    CMD=("$SCRCPY_BIN")
+    # Handle Flatpak command which needs to be split into array elements
+    if [[ "$SCRCPY_BIN" == "flatpak run"* ]]; then
+        # Split "flatpak run org.scrcpy.ScrCpy" into array elements
+        IFS=' ' read -r -a FLATPAK_CMD <<< "$SCRCPY_BIN"
+        CMD=("${FLATPAK_CMD[@]}")
+    else
+        CMD=("$SCRCPY_BIN")
+    fi
     CMD+=("-s" "$PHONE_IP:5555")
     CMD+=("--video-source=camera")
     CMD+=("--camera-facing=$CAMERA_FACING")
     
     if [ ! -z "$VIDEO_SIZE" ]; then
-        CMD+=("--max-size=$VIDEO_SIZE")
+        # VIDEO_SIZE should be a number (max dimension), not WxH format
+        # Extract the largest number from the input (handles both "1080" and "1920x1080" formats)
+        local max_dim
+        # Remove all non-digits, then find the maximum value
+        local digits_only
+        digits_only=$(echo "$VIDEO_SIZE" | sed 's/[^0-9]/ /g')
+        # Extract all numbers and find the maximum
+        max_dim="0"
+        for num in $digits_only; do
+            if [ ! -z "$num" ] && [ "$num" -gt "$max_dim" ] 2>/dev/null; then
+                max_dim="$num"
+            fi
+        done
+        
+        if [ ! -z "$max_dim" ] && [ "$max_dim" -gt 0 ] 2>/dev/null; then
+            CMD+=("--max-size=$max_dim")
+        else
+            echo -e "${YELLOW}Warning:${NC} Invalid VIDEO_SIZE format. Use a number (e.g., 1080) or leave empty."
+        fi
     fi
     
     if [ ! -z "$BIT_RATE" ]; then
         CMD+=("--video-bit-rate=$BIT_RATE")
     fi
     
-    CMD+=("--v4l2-sink=/dev/video0")
+    CMD+=("--v4l2-sink=/dev/video10")
     
     # Parse EXTRA_ARGS safely to prevent command injection
     # Security: Validate and parse without using eval
@@ -607,8 +774,24 @@ cmd_status() {
         echo -e "adb: ${RED}NOT FOUND${NC}"
     fi
     
-    if command -v scrcpy >/dev/null 2>&1 || [ -f /snap/bin/scrcpy ]; then
-        echo -e "scrcpy: ${GREEN}OK${NC}"
+    local scrcpy_status="NOT FOUND"
+    local scrcpy_path=""
+    if command -v scrcpy >/dev/null 2>&1; then
+        scrcpy_path=$(command -v scrcpy)
+        scrcpy_status="OK"
+    elif [ -f /snap/bin/scrcpy ]; then
+        scrcpy_path="/snap/bin/scrcpy"
+        scrcpy_status="OK"
+    elif [ -f "$HOME/.local/bin/scrcpy" ]; then
+        scrcpy_path="$HOME/.local/bin/scrcpy"
+        scrcpy_status="OK"
+    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+        scrcpy_path="flatpak run org.scrcpy.ScrCpy"
+        scrcpy_status="OK"
+    fi
+    
+    if [ "$scrcpy_status" = "OK" ]; then
+        echo -e "scrcpy: ${GREEN}OK${NC} ($scrcpy_path)"
     else
         echo -e "scrcpy: ${RED}NOT FOUND${NC}"
     fi

@@ -14,7 +14,7 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 *   🚀 **Zero apps on phone** (uses built-in USB debugging).
 *   ⚡ **Ultra low latency** (via P2P protocol and `scrcpy`).
 *   🎥 **High Quality** (HD/Full HD depending on phone).
-*   🐧 **Native Integration** (visible as `/dev/video0` in Zoom, Teams, OBS, Chrome).
+*   🐧 **Native Integration** (visible as `/dev/video10` in Zoom, Teams, OBS, Chrome).
 *   🔋 **Battery Saving** (phone screen is automatically turned off during operation).
 
 ---
@@ -64,7 +64,7 @@ When you want to join a call:
 
 *   A system notification appears: "Android Camera: Active".
 *   The phone screen turns off automatically (to save battery).
-*   Open Zoom/Teams/Discord and select the camera: **Android Cam**.
+*   Open Zoom/Teams/Discord and select the camera: **Android Cam** (appears as `/dev/video10`).
 
 **To turn off:** Simply click the **📷 Camera Phone** icon again or use the notification action.
 
@@ -98,7 +98,7 @@ File location: `~/.config/android-webcam/settings.conf`
 
 ```bash
 CAMERA_FACING="back"      # Options: front, back, external
-VIDEO_SIZE="1920x1080"    # Leave empty for max resolution
+VIDEO_SIZE="1080"         # Max dimension in pixels (e.g., 1080 for 1080p), leave empty for max resolution
 BIT_RATE="8M"             # Higher = better quality, more latency
 ```
 
@@ -126,13 +126,20 @@ and update the `PHONE_IP` line. Or simply run the installer (`install.sh`) again
 
 ## 🗑️ Uninstall
 
-If you want to remove the tool, simply run the installer with the uninstall flag:
+If you want to remove the tool:
 
+**If you have the installer locally:**
 ```bash
 ./install.sh --uninstall
 ```
 
-Alternatively, you can manually delete the files:
+**If you installed via one-liner (`wget ... | bash`):**
+```bash
+wget -O /tmp/install.sh https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh
+bash /tmp/install.sh --uninstall
+```
+
+**Alternatively, you can manually delete the files:**
 
 ```bash
 # Remove scripts, config, and icons
