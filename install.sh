@@ -69,7 +69,7 @@ check_path() {
 uninstall() {
     echo -e "${RED}!!! WARNING !!!${NC}"
     echo "This will remove configuration files, icons, and control scripts."
-    read -p "Are you sure? (y/N): " confirm
+    read -r -p "Are you sure? (y/N): " confirm
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         echo "Aborted."
         exit 0
@@ -86,13 +86,14 @@ uninstall() {
     log_success "Files removed."
     
     echo "Do you want to remove system dependencies (scrcpy, v4l2loopback etc.)?"
-    read -p "Remove packages? (y/N): " pkg_confirm
+    read -r -p "Remove packages? (y/N): " pkg_confirm
     if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
         DISTRO=$(detect_distro)
         case "$DISTRO" in
             ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils ;;
             arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms ;;
             fedora) sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils ;;
+            opensuse*|suse) sudo zypper remove -y scrcpy v4l2loopback-kmp-default v4l2loopback-utils ;;
             *) echo "Please remove packages manually for your distro." ;;
         esac
     fi
@@ -151,7 +152,7 @@ install_deps() {
             log_info "Using DNF..."
             if ! dnf repolist | grep -q "rpmfusion"; then
                 log_warn "Fedora requires RPMFusion for v4l2loopback."
-                read -p "Press Enter to try installing anyway (might fail)..."
+                read -r -p "Press Enter to try installing anyway (might fail)..."
             fi
             sudo dnf install -y android-tools v4l2loopback v4l2loopback-utils scrcpy ffmpeg libnotify
             ;;
@@ -162,7 +163,7 @@ install_deps() {
         *)
             log_error "Unsupported distribution: $DISTRO"
             echo "Manual install required: adb, v4l2loopback, scrcpy, ffmpeg, libnotify"
-            read -p "Press Enter if you have installed them manually..."
+            read -r -p "Press Enter if you have installed them manually..."
             ;;
     esac
 }
@@ -400,7 +401,7 @@ ensure_scrcpy() {
     echo "  - Flatpak: flatpak install flathub org.scrcpy.ScrCpy"
     echo "  - Or download from: https://github.com/Genymobile/scrcpy/releases"
     echo ""
-    read -p "Press Enter to continue anyway (camera may not work)..."
+    read -r -p "Press Enter to continue anyway (camera may not work)..."
     return 1
 }
 
@@ -1102,7 +1103,7 @@ else
     # Escape special characters in PHONE_IP for safe use in sed
     # Note: sed -i without suffix works on GNU sed (Linux)
     # On BSD sed (macOS), would need: sed -i '' "s|..."
-    ESCAPED_IP=$(printf '%s\n' "$PHONE_IP" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    ESCAPED_IP=$(printf '%s\n' "$PHONE_IP" | sed 's/[\[\.*^$()+?{|}]/\\&/g')
     if ! sed -i "s|PHONE_IP=.*|PHONE_IP=\"$ESCAPED_IP\"|" "$CONFIG_FILE" 2>/dev/null; then
         log_warn "Could not update IP in config. Please edit $CONFIG_FILE manually."
         log_warn "Set: PHONE_IP=\"$PHONE_IP\""
@@ -1128,7 +1129,7 @@ Actions=Status;Config;Fix;
 
 [Desktop Action Status]
 Name=Check Status
-Exec=bash -c "\"$BIN_DIR/android-webcam-ctl\" status; read -p 'Press Enter...' "
+Exec=bash -c "\"$BIN_DIR/android-webcam-ctl\" status; read -r -p 'Press Enter...' "
 Terminal=true
 
 [Desktop Action Config]

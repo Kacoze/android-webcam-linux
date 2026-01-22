@@ -188,16 +188,16 @@ rm -f ~/.local/share/applications/android-cam-fix.desktop
 
 # Optional: remove system dependencies
 # Ubuntu/Debian/Mint:
-sudo apt remove v4l2loopback-dkms v4l2loopback-utils scrcpy
+sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils
 
 # Arch/Manjaro:
-sudo pacman -Rs v4l2loopback-dkms scrcpy
+sudo pacman -Rs scrcpy v4l2loopback-dkms
 
 # Fedora:
-sudo dnf remove v4l2loopback v4l2loopback-utils scrcpy
+sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils
 
 # openSUSE:
-sudo zypper remove v4l2loopback-kmp-default v4l2loopback-utils scrcpy
+sudo zypper remove -y scrcpy v4l2loopback-kmp-default v4l2loopback-utils
 ```
 
 ## 🤝 Credits
