@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Kolory dla lepszego UX
+# Colors for better UX
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
@@ -10,131 +10,131 @@ echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}   Android Webcam Setup (Linux)          ${NC}"
 echo -e "${BLUE}=========================================${NC}"
 
-# KROK 1: Zależności
-echo -e "\n${GREEN}[1/5] Instalacja zależności systemowych...${NC}"
+# STEP 1: Dependencies
+echo -e "\n${GREEN}[1/5] Installing system dependencies...${NC}"
 DEPENDENCIES="android-tools-adb v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg"
 
-# Aktualizacja i instalacja (apt sam pominie zainstalowane)
+# Update and install (apt will skip already installed ones)
 if ! sudo apt update && sudo apt install -y $DEPENDENCIES; then
-    echo -e "${RED}Błąd instalacji pakietów! Sprawdź połączenie z internetem.${NC}"
+    echo -e "${RED}Package installation failed! Check your internet connection.${NC}"
     exit 1
 fi
 
-# KROK 2: Konfiguracja modułu wideo (v4l2loopback)
-echo -e "\n${GREEN}[2/5] Konfiguracja wirtualnej kamery...${NC}"
+# STEP 2: Video module configuration (v4l2loopback)
+echo -e "\n${GREEN}[2/5] Configuring virtual camera...${NC}"
 CONF_FILE="/etc/modprobe.d/v4l2loopback.conf"
 LOAD_FILE="/etc/modules-load.d/v4l2loopback.conf"
 
-# Sprawdzamy czy konfiguracja już istnieje, jeśli nie - tworzymy
+# Check if configuration already exists, if not - create it
 if ! grep -q "Android Cam" "$CONF_FILE" 2>/dev/null; then
-    echo "Tworzenie konfiguracji sterownika..."
+    echo "Creating driver configuration..."
     echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee "$CONF_FILE" > /dev/null
     echo "v4l2loopback" | sudo tee "$LOAD_FILE" > /dev/null
     
-    # Przeładowanie modułu
+    # Reload module
     sudo modprobe -r v4l2loopback 2>/dev/null
     sudo modprobe v4l2loopback
-    echo "Moduł załadowany pomyślnie."
+    echo "Module loaded successfully."
 else
-    echo "Sterownik jest już skonfigurowany."
+    echo "Driver is already configured."
 fi
 
-# KROK 3: Wykrywanie telefonu i IP
-echo -e "\n${GREEN}[3/5] Parowanie telefonu...${NC}"
+# STEP 3: Phone detection and IP
+echo -e "\n${GREEN}[3/5] Pairing phone...${NC}"
 echo "---------------------------------------------------"
-echo "PROSZĘ WYKONAĆ TERAZ:"
-echo "1. Podłącz telefon kablem USB do komputera."
-echo "2. Upewnij się, że debugowanie USB jest włączone."
-echo "3. Zaakceptuj klucz RSA na ekranie telefonu (jeśli zapyta)."
+echo "PLEASE DO THIS NOW:"
+echo "1. Connect your phone to the computer via USB cable."
+echo "2. Make sure USB Debugging is enabled."
+echo "3. Accept the RSA key on your phone screen (if prompted)."
 echo "---------------------------------------------------"
-echo "Oczekiwanie na urządzenie..."
+echo "Waiting for device..."
 
 adb wait-for-usb-device
 
-echo "Wykryto urządzenie! Pobieranie adresu IP..."
-# Próba automatycznego wyciągnięcia IP z interfejsu wlan0
+echo "Device detected! Fetching IP address..."
+# Attempt to automatically extract IP from wlan0 interface
 PHONE_IP=$(adb shell ip -4 -o addr show wlan0 | awk '{print $4}' | cut -d/ -f1)
 
 if [ -z "$PHONE_IP" ]; then
-    echo -e "${RED}Nie udało się wykryć IP automatycznie.${NC}"
-    echo "Upewnij się, że telefon jest połączony z Wi-Fi."
-    read -p "Podaj adres IP telefonu ręcznie (np. 192.168.1.XX): " PHONE_IP
+    echo -e "${RED}Could not detect IP automatically.${NC}"
+    echo "Make sure the phone is connected to Wi-Fi."
+    read -p "Enter phone IP address manually (e.g., 192.168.1.XX): " PHONE_IP
 else
-    echo -e "Znaleziono IP: ${BLUE}$PHONE_IP${NC}"
+    echo -e "Found IP: ${BLUE}$PHONE_IP${NC}"
 fi
 
-# Zapis konfiguracji
+# Save configuration
 CONFIG_DIR="$HOME/.config/android-webcam"
 mkdir -p "$CONFIG_DIR"
 echo "PHONE_IP=$PHONE_IP:5555" > "$CONFIG_DIR/config.env"
 
-# Przełączenie ADB w tryb TCP
-echo "Przełączanie ADB w tryb sieciowy (port 5555)..."
+# Switch ADB to TCP mode
+echo "Switching ADB to network mode (port 5555)..."
 adb tcpip 5555
 sleep 3
-echo "Gotowe."
+echo "Done."
 
-# KROK 4: Generowanie skryptów sterujących
-echo -e "\n${GREEN}[4/5] Instalowanie skryptów sterujących...${NC}"
+# STEP 4: Generating control scripts
+echo -e "\n${GREEN}[4/5] Installing control scripts...${NC}"
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 
-# -- Skrypt TOGGLE (Włącz/Wyłącz) --
+# -- TOGGLE Script (On/Off) --
 cat << 'EOF' > "$BIN_DIR/android-cam-toggle.sh"
 #!/bin/bash
 source ~/.config/android-webcam/config.env
 LOG="/tmp/android-cam.log"
 
-# Jeśli działa -> Wyłącz
+# If running -> Turn off
 if pgrep -f "scrcpy.*video-source=camera" > /dev/null; then
     pkill -f "scrcpy.*video-source=camera"
-    notify-send -u low -i camera-web "Kamera Android" "Zatrzymano przesyłanie."
+    notify-send -u low -i camera-web "Android Camera" "Streaming stopped."
     exit 0
 fi
 
-# Jeśli nie działa -> Włącz
-notify-send -u low -i camera-web "Kamera Android" "Łączenie z $PHONE_IP..."
+# If not running -> Turn on
+notify-send -u low -i camera-web "Android Camera" "Connecting to $PHONE_IP..."
 
-# Próba połączenia
+# Attempt connection
 adb connect $PHONE_IP > /dev/null
-# Nawet jeśli adb connect zwróci błąd, scrcpy czasem potrafi się połączyć, więc próbujemy odpalić:
+# Even if adb connect returns error, scrcpy might still connect, so try running:
 
 nohup scrcpy -s $PHONE_IP --video-source=camera --camera-facing=front --v4l2-sink=/dev/video0 --no-audio > "$LOG" 2>&1 &
 PID=$!
 
 sleep 3
 if ps -p $PID > /dev/null; then
-    notify-send -u normal -i camera-web "Kamera Android" "Działa! (PID: $PID)"
+    notify-send -u normal -i camera-web "Android Camera" "Active! (PID: $PID)"
 else
-    # Czytamy błąd
+    # Read error
     ERR=$(head -n 5 "$LOG")
-    notify-send -u critical -i error "Błąd Kamery" "Nie udało się uruchomić.\nUżyj opcji 'Napraw Kamerę (USB)'."
+    notify-send -u critical -i error "Camera Error" "Failed to start.\nUse 'Fix Camera (USB)' option."
 fi
 EOF
 
-# -- Skrypt FIX (Naprawa po restarcie telefonu) --
+# -- FIX Script (Repair after phone restart) --
 cat << 'EOF' > "$BIN_DIR/android-cam-fix.sh"
 #!/bin/bash
-notify-send -i smartphone "Kamera Setup" "Podłącz telefon kablem USB..."
+notify-send -i smartphone "Camera Setup" "Connect phone via USB cable..."
 adb wait-for-usb-device
 adb tcpip 5555
-notify-send -i smartphone "Kamera Setup" "Gotowe! Możesz odłączyć kabel."
+notify-send -i smartphone "Camera Setup" "Done! You can disconnect the cable."
 EOF
 
 chmod +x "$BIN_DIR/android-cam-toggle.sh"
 chmod +x "$BIN_DIR/android-cam-fix.sh"
 
-# KROK 5: Generowanie ikon w menu
-echo -e "\n${GREEN}[5/5] Tworzenie skrótów w menu...${NC}"
+# STEP 5: Generating menu icons
+echo -e "\n${GREEN}[5/5] Creating menu shortcuts...${NC}"
 APP_DIR="$HOME/.local/share/applications"
 mkdir -p "$APP_DIR"
 
-# Ikona Główna
+# Main Icon
 cat << EOF > "$APP_DIR/android-cam.desktop"
 [Desktop Entry]
 Version=1.0
-Name=Kamera Telefon
-Comment=Włącz/Wyłącz kamerę z Androida
+Name=Camera Phone
+Comment=Toggle Android Camera
 Exec=$BIN_DIR/android-cam-toggle.sh
 Icon=camera-web
 Terminal=false
@@ -142,12 +142,12 @@ Type=Application
 Categories=Utility;Video;
 EOF
 
-# Ikona Naprawcza
+# Fix Icon
 cat << EOF > "$APP_DIR/android-cam-fix.desktop"
 [Desktop Entry]
 Version=1.0
-Name=Napraw Kamerę (USB)
-Comment=Kliknij, jeśli zrestartowałeś telefon
+Name=Fix Camera (USB)
+Comment=Click if you restarted your phone
 Exec=$BIN_DIR/android-cam-fix.sh
 Icon=smartphone
 Terminal=false
@@ -155,14 +155,14 @@ Type=Application
 Categories=Utility;Settings;
 EOF
 
-# Odświeżenie bazy ikon (dla pewności)
+# Refresh icon database (just in case)
 update-desktop-database "$APP_DIR" 2>/dev/null
 
 echo -e "\n${BLUE}=========================================${NC}"
-echo -e "${GREEN}   INSTALACJA ZAKOŃCZONA SUKCESEM!       ${NC}"
+echo -e "${GREEN}   INSTALLATION SUCCESSFUL!              ${NC}"
 echo -e "${BLUE}=========================================${NC}"
-echo "Możesz bezpiecznie odłączyć kabel USB."
-echo "W menu aplikacji znajdziesz teraz:"
-echo " 1. Kamera Telefon (używaj na co dzień)"
-echo " 2. Napraw Kamerę (używaj po restarcie telefonu)"
+echo "You can safely disconnect the USB cable."
+echo "In your application menu you will now find:"
+echo " 1. Camera Phone (daily usage)"
+echo " 2. Fix Camera (use after phone restart)"
 echo ""
