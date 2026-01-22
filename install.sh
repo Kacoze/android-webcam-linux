@@ -90,7 +90,7 @@ uninstall() {
     if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
         DISTRO=$(detect_distro)
         case $DISTRO in
-            ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils android-tools-adb ;;
+            ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils ;;
             arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms android-tools ;;
             fedora) sudo dnf remove -y scrcpy v4l2loopback ;;
             *) echo "Please remove packages manually for your distro." ;;
@@ -448,12 +448,26 @@ log_info "Detecting Wi-Fi IP address..."
 PHONE_IP=""
 # Check if awk and cut are available for auto-detection
 if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
-    for iface in wlan0 swlan0 wlan1 wlan2 eth0; do
-        IP=$(adb shell ip -4 -o addr show $iface 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+    for iface in wlan0 swlan0 wlan1 wlan2; do
+        IP=$(adb shell ip -4 -o addr show $iface 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]')
         if [ ! -z "$IP" ]; then
-            PHONE_IP=$IP
-            log_success "Found IP ($iface): $PHONE_IP"
-            break
+            # Validate IP format
+            if [[ "$IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+                # Check each octet is 0-255
+                IFS='.' read -ra ADDR <<< "$IP"
+                valid=true
+                for i in "${ADDR[@]}"; do
+                    if [[ $i -lt 0 || $i -gt 255 ]]; then
+                        valid=false
+                        break
+                    fi
+                done
+                if [ "$valid" = true ]; then
+                    PHONE_IP=$IP
+                    log_success "Found IP ($iface): $PHONE_IP"
+                    break
+                fi
+            fi
         fi
     done
 else
@@ -586,10 +600,14 @@ load_config() {
     if [ ! -f "$CONFIG_FILE" ] && [ -f "$CONFIG_DIR/config.env" ]; then
         if ! source "$CONFIG_DIR/config.env" 2>/dev/null; then
             echo -e "${YELLOW}Warning:${NC} Error loading old config.env, using defaults"
+            PHONE_IP=""
         fi
-        # Extract IP from OLD format (IP:PORT)
-        # Use sed instead of cut for better compatibility
-        CLEAN_IP=$(echo "$PHONE_IP" | sed 's/:.*$//')
+        # Extract IP from OLD format (IP:PORT) if PHONE_IP is set
+        if [ ! -z "$PHONE_IP" ]; then
+            CLEAN_IP=$(echo "$PHONE_IP" | sed 's/:.*$//')
+        else
+            CLEAN_IP=""
+        fi
         
         # Write new config
         cat << END_CONF > "$CONFIG_FILE"
@@ -821,7 +839,7 @@ cmd_start() {
             echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
             notify "normal" "Android Camera" "✅ Active (PID: $PID)"
         else
-                echo -e "${RED}Failed to start.${NC} Check $LOG_FILE"
+            echo -e "${RED}Failed to start.${NC} Check $LOG_FILE"
             # Show first 5 lines of log file (use sed as fallback if head is not available)
             if command -v head >/dev/null 2>&1; then
                 head -n 5 "$LOG_FILE" 2>/dev/null || true
@@ -1020,17 +1038,14 @@ PHONE_IP="$PHONE_IP"
 CAMERA_FACING="back"
 VIDEO_SIZE=""
 BIT_RATE="8M"
-EXTRA_ARGS="--no-audio --buffer=400"
+EXTRA_ARGS="--no-audio --buffer=400"  # Additional scrcpy arguments
 EOF
 else
     log_info "Updating IP in existing config..."
     # File exists (we're in the else block), so update it
     if ! sed -i "s|PHONE_IP=.*|PHONE_IP=\"$PHONE_IP\"|" "$CONFIG_FILE" 2>/dev/null; then
-        log_warn "Failed to update IP in config file (may be read-only). Creating backup..."
-        # Try to create a new file if sed fails
-        if [ -w "$CONFIG_FILE" ]; then
-            sed "s|PHONE_IP=.*|PHONE_IP=\"$PHONE_IP\"|" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE" 2>/dev/null || log_warn "Could not update config file"
-        fi
+        log_warn "Could not update IP in config. Please edit $CONFIG_FILE manually."
+        log_warn "Set: PHONE_IP=\"$PHONE_IP\""
     fi
 fi
 

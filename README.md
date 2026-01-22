@@ -108,6 +108,7 @@ File location: `~/.config/android-webcam/settings.conf`
 CAMERA_FACING="back"      # Options: front, back, external
 VIDEO_SIZE=""             # Max dimension in pixels (e.g., "1080" for 1080p), leave empty for max resolution
 BIT_RATE="8M"             # Higher = better quality, more latency
+EXTRA_ARGS="--no-audio --buffer=400"  # Additional scrcpy arguments
 ```
 
 ---
@@ -123,12 +124,27 @@ Most messengers (Zoom/Teams) mirror your video by default (you see yourself reve
 **Quality is poor / lagging?**
 Make sure your phone and computer are on the same Wi-Fi network (preferably 5GHz). Weak signal can cause stuttering.
 
+**Camera not visible in Zoom/Teams (/dev/video10 missing)?**
+The v4l2loopback kernel module may not be loaded. Check with:
+```bash
+lsmod | grep v4l2loopback
+```
+If empty, try loading it manually:
+```bash
+sudo modprobe v4l2loopback
+```
+If this fails, you may have Secure Boot enabled. Either disable Secure Boot in BIOS or sign the kernel module.
+
 **I changed my router / network, what to do?**
 If the phone's IP address changed, run:
 ```bash
 android-webcam-ctl config
 ```
-and update the `PHONE_IP` line. Or simply run the installer (`install.sh`) again.
+and update the line:
+```bash
+PHONE_IP="192.168.1.50"  # Replace with your new phone IP
+```
+Or simply run the installer again to auto-detect the new IP.
 
 ---
 
@@ -158,11 +174,12 @@ bash /tmp/install.sh --uninstall
 # Remove scripts, config, and icons
 rm -f ~/.local/bin/android-webcam-ctl
 rm -rf ~/.config/android-webcam
-rm -rf ~/.local/share/applications/android-cam*
+rm -f ~/.local/share/applications/android-cam.desktop
+rm -f ~/.local/share/applications/android-cam-fix.desktop
 
 # Optional: remove system dependencies
 # Ubuntu/Debian/Mint:
-sudo apt remove v4l2loopback-dkms scrcpy
+sudo apt remove v4l2loopback-dkms v4l2loopback-utils scrcpy
 
 # Arch/Manjaro:
 sudo pacman -Rs v4l2loopback-dkms scrcpy
@@ -171,7 +188,7 @@ sudo pacman -Rs v4l2loopback-dkms scrcpy
 sudo dnf remove v4l2loopback scrcpy
 
 # openSUSE:
-sudo zypper remove v4l2loopback-kmp-default scrcpy
+sudo zypper remove v4l2loopback-kmp-default v4l2loopback-utils scrcpy
 ```
 
 ## 🤝 Credits
