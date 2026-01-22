@@ -23,12 +23,14 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 
 1.  **System:** Linux (tested on Ubuntu 22.04 / 24.04, Debian, Mint, Pop!_OS, Arch Linux, Manjaro, Fedora, openSUSE, and others).
 2.  **Phone:** Android 5.0 or newer.
-3.  **Network:** Computer and phone must be on the same Wi-Fi network.
-4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this).
-5.  **Privileges:** Administrator access (sudo) required for installing system packages and kernel modules.
-6.  **Internet:** Active internet connection is **required during installation** for:
+3.  **Network:** Computer and phone must be on the same Wi-Fi network (for wireless operation after initial setup).
+4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this automatically).
+5.  **Privileges:** ⚠️ **Administrator access (sudo) is required** for installing system packages and kernel modules. The installer will prompt for your password.
+6.  **Internet:** ⚠️ **Active internet connection is required ONLY during installation** for:
     - Downloading system dependencies (via package manager)
     - Downloading `scrcpy` from GitHub Releases (if not available via package manager, Snap, or Flatpak)
+    
+    **Note:** After installation, the tool works completely offline. No internet connection is needed for daily use.
 
 ### 📱 Step 0: Phone Preparation (One-time only)
 
@@ -41,7 +43,33 @@ Before running the installer, you must enable **USB Debugging** on your phone:
 
 ---
 
+## 🔒 Security / Bezpieczeństwo
+
+**⚠️ Important Security Notice:**
+
+Before running the installation script, please be aware:
+
+*   **Administrator privileges required:** The installer requires `sudo` access to install system packages and kernel modules. Only run this script if you trust the source.
+*   **Review the script:** Before executing any script downloaded from the internet, it's recommended to review its contents first. You can view the script at:
+    ```bash
+    # View the script before running:
+    curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | less
+    ```
+*   **Alternative installation method:** If you prefer not to pipe directly to bash, you can download and review the script first:
+    ```bash
+    wget https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh
+    # Review install.sh, then run:
+    bash install.sh
+    ```
+
+---
+
 ## 📥 Installation (One-Liner)
+
+**⚠️ Before proceeding:**
+- Make sure you have **administrator (sudo) privileges** - the installer will prompt for your password
+- Ensure you have an **active internet connection** (required only during installation)
+- The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices
 
 Open a terminal (Ctrl+Alt+T) and paste one of the following commands:
 
@@ -154,6 +182,69 @@ If the phone's IP address changed, you can either:
    ```bash
    android-webcam-ctl config
    ```
+
+**What to do when Secure Boot blocks the v4l2loopback module?**
+If `sudo modprobe v4l2loopback` fails with a "Required key not available" error, Secure Boot is enabled. You have two options:
+
+1. **Disable Secure Boot** (easier, but less secure):
+   - Restart your computer and enter BIOS/UEFI settings (usually F2, F10, F12, or Del during boot)
+   - Find "Secure Boot" option and disable it
+   - Save and exit, then try `sudo modprobe v4l2loopback` again
+
+2. **Sign the kernel module** (more secure, but complex):
+   - This requires generating a Machine Owner Key (MOK) and signing the module
+   - Detailed instructions vary by distribution - search for "sign kernel module secure boot" for your distro
+
+**How to check scrcpy version?**
+Run one of these commands:
+```bash
+# If installed via package manager:
+scrcpy --version
+
+# If installed via Snap:
+/snap/bin/scrcpy --version
+
+# If installed via Flatpak:
+flatpak run org.scrcpy.ScrCpy --version
+
+# If installed manually:
+~/.local/bin/scrcpy --version
+```
+The installer requires scrcpy version 2.0 or newer.
+
+**What if the phone doesn't connect via Wi-Fi?**
+Troubleshooting steps:
+
+1. **Check if phone and computer are on the same Wi-Fi network** - they must be on the same network for wireless connection to work.
+
+2. **Verify USB debugging is still enabled** - sometimes Android disables it after restart.
+
+3. **Re-run the pairing process** - use the "Fix Camera (USB)" icon or run:
+   ```bash
+   android-webcam-ctl fix
+   ```
+   Then connect via USB cable and follow the prompts.
+
+4. **Check phone's IP address** - the IP might have changed. Run:
+   ```bash
+   android-webcam-ctl status
+   ```
+   to see the current configuration, or edit the config file manually.
+
+5. **Test ADB connection manually**:
+   ```bash
+   adb connect YOUR_PHONE_IP:5555
+   ```
+   Replace `YOUR_PHONE_IP` with your phone's actual IP address.
+
+**Is internet required after installation?**
+No. Internet is only required **during installation** for:
+- Downloading system dependencies via package manager
+- Downloading scrcpy from GitHub (if not available via package manager, Snap, or Flatpak)
+
+After installation, the tool works completely offline. It only needs:
+- Your phone and computer on the same Wi-Fi network (for wireless connection)
+- Or USB cable connection (for initial pairing)
 
 ---
 

@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Strict mode: exit on error, undefined variables, and pipe failures
+# Note: Some commands intentionally return non-zero (e.g., grep -q), so || true is used where needed
+set -euo pipefail
+
 # =============================================================================
 # 📸 Android Webcam Setup for Linux (Universal)
 # =============================================================================
@@ -64,6 +68,22 @@ check_path() {
         echo -e "${YELLOW}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
         sleep 2
     fi
+}
+
+validate_ip() {
+    local ip="$1"
+    # Basic IPv4 validation regex
+    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        # Check each octet is 0-255
+        IFS='.' read -ra ADDR <<< "$ip"
+        for i in "${ADDR[@]}"; do
+            if (( 10#$i < 0 || 10#$i > 255 )); then
+                return 1
+            fi
+        done
+        return 0
+    fi
+    return 1
 }
 
 uninstall() {
@@ -140,13 +160,15 @@ install_deps() {
     case "$DISTRO" in
         ubuntu|debian|pop|linuxmint|kali|neon|zorin)
             log_info "Using APT..."
-            sudo apt update
+            sudo apt update || return 1
             DEPS=("android-tools-adb" "v4l2loopback-dkms" "v4l2loopback-utils" "ffmpeg" "libnotify-bin")
-            sudo apt install -y "${DEPS[@]}"
+            sudo apt install -y "${DEPS[@]}" || return 1
+            return 0
             ;;
         arch|manjaro|endeavouros|garuda)
             log_info "Using PACMAN..."
-            sudo pacman -Sy --needed android-tools v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg libnotify
+            sudo pacman -Sy --needed android-tools v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg libnotify || return 1
+            return 0
             ;;
         fedora|rhel|centos|nobara)
             log_info "Using DNF..."
@@ -154,16 +176,19 @@ install_deps() {
                 log_warn "Fedora requires RPMFusion for v4l2loopback."
                 read -r -p "Press Enter to try installing anyway (might fail)..."
             fi
-            sudo dnf install -y android-tools v4l2loopback v4l2loopback-utils scrcpy ffmpeg libnotify
+            sudo dnf install -y android-tools v4l2loopback v4l2loopback-utils scrcpy ffmpeg libnotify || return 1
+            return 0
             ;;
         opensuse*|suse)
             log_info "Using ZYPPER..."
-            sudo zypper install -y android-tools v4l2loopback-kmp-default v4l2loopback-utils scrcpy ffmpeg libnotify
+            sudo zypper install -y android-tools v4l2loopback-kmp-default v4l2loopback-utils scrcpy ffmpeg libnotify || return 1
+            return 0
             ;;
         *)
             log_error "Unsupported distribution: $DISTRO"
             echo "Manual install required: adb, v4l2loopback, scrcpy, ffmpeg, libnotify"
             read -r -p "Press Enter if you have installed them manually..."
+            return 1
             ;;
     esac
 }
@@ -482,21 +507,10 @@ if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
         IP=$(adb shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]')
         if [ ! -z "$IP" ]; then
             # Validate IP format
-            if [[ "$IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-                # Check each octet is 0-255
-                IFS='.' read -ra ADDR <<< "$IP"
-                valid=true
-                for i in "${ADDR[@]}"; do
-                    if (( 10#$i < 0 || 10#$i > 255 )); then
-                        valid=false
-                        break
-                    fi
-                done
-                if [ "$valid" = true ]; then
-                    PHONE_IP="$IP"
-                    log_success "Found IP ($iface): $PHONE_IP"
-                    break
-                fi
+            if validate_ip "$IP"; then
+                PHONE_IP="$IP"
+                log_success "Found IP ($iface): $PHONE_IP"
+                break
             fi
         fi
     done
@@ -509,19 +523,8 @@ if [ -z "$PHONE_IP" ]; then
     while true; do
         read -r -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
         # Validate IP format
-        if [[ "$PHONE_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-            # Check each octet is 0-255
-            IFS='.' read -ra ADDR <<< "$PHONE_IP"
-            valid=true
-            for i in "${ADDR[@]}"; do
-                if (( 10#$i < 0 || 10#$i > 255 )); then
-                    valid=false
-                    break
-                fi
-            done
-            if [ "$valid" = true ]; then
-                break
-            fi
+        if validate_ip "$PHONE_IP"; then
+            break
         fi
         log_error "Invalid IP address format. Please try again."
     done
