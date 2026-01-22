@@ -4,7 +4,7 @@
 # 📸 Android Webcam Setup for Linux (Universal)
 # =============================================================================
 # Transforms your Android device into a low-latency HD webcam for Linux.
-# GitHub: https://github.com/TWOJ_NICK/android-webcam-linux
+# GitHub: https://github.com/Kacoze/android-webcam-linux
 # =============================================================================
 
 # --- CONSTANTS & COLORS ---
@@ -157,7 +157,8 @@ echo -e "\n${GREEN}[Check] Verifying scrcpy version...${NC}"
 
 check_scrcpy() {
     if ! command -v scrcpy &> /dev/null; then echo "0.0"; return; fi
-    scrcpy --version 2>/dev/null | head -n 1 | awk '{print $2}'
+    # More reliable version parsing
+    scrcpy --version 2>/dev/null | grep -oP '\d+\.\d+(\.\d+)?' | head -n 1 || echo "0.0"
 }
 
 CURRENT_VER=$(check_scrcpy)
@@ -192,16 +193,38 @@ if ! grep -q "Android Cam" "$CONF_FILE" 2>/dev/null; then
     sudo modprobe -r v4l2loopback 2>/dev/null
     if sudo modprobe v4l2loopback; then
         log_success "Module loaded."
+        # Verify module is actually loaded
+        sleep 1
+        if ! lsmod | grep -q v4l2loopback; then
+            log_warn "Module may not be loaded properly. Check with: lsmod | grep v4l2loopback"
+        fi
     else
         log_error "Failed to load module (Secure Boot?)."
-        echo "Try rebooting your system."
+        echo "Try rebooting your system or check Secure Boot settings."
+        log_warn "Continuing anyway, but camera may not work..."
     fi
 else
     log_success "Module check passed."
+    # Verify module is loaded
+    if ! lsmod | grep -q v4l2loopback; then
+        log_warn "Module configuration exists but module is not loaded."
+        log_info "Attempting to load module..."
+        if sudo modprobe v4l2loopback; then
+            log_success "Module loaded."
+        else
+            log_warn "Failed to load module. Camera may not work."
+        fi
+    fi
 fi
 
 # --- STEP 3: PHONE PAIRING ---
 echo -e "\n${GREEN}[3/5] Pairing Phone...${NC}"
+
+# Check if adb is available
+if ! command -v adb >/dev/null 2>&1; then
+    log_error "adb not found! Please install android-tools-adb first."
+    exit 1
+fi
 
 echo "---------------------------------------------------"
 echo " 1. USB Connection: YES (Connect cable now)"
@@ -209,7 +232,10 @@ echo " 2. USB Debugging:  ENABLED (In Developer Options)"
 echo " 3. RSA Prompt:     ACCEPTED (On phone screen)"
 echo "---------------------------------------------------"
 log_info "Waiting for device..."
-adb wait-for-usb-device
+if ! adb wait-for-usb-device; then
+    log_error "Failed to detect device or operation cancelled."
+    exit 1
+fi
 
 log_success "Device connected!"
 log_info "Detecting Wi-Fi IP address..."
@@ -226,11 +252,32 @@ done
 
 if [ -z "$PHONE_IP" ]; then
     log_warn "Could not auto-detect Wi-Fi IP."
-    read -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
+    while true; do
+        read -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
+        # Validate IP format
+        if [[ "$PHONE_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            # Check each octet is 0-255
+            IFS='.' read -ra ADDR <<< "$PHONE_IP"
+            valid=true
+            for i in "${ADDR[@]}"; do
+                if [[ $i -lt 0 || $i -gt 255 ]]; then
+                    valid=false
+                    break
+                fi
+            done
+            if [ "$valid" = true ]; then
+                break
+            fi
+        fi
+        log_error "Invalid IP address format. Please try again."
+    done
 fi
 
 # Enable TCP/IP
-adb tcpip 5555
+if ! adb tcpip 5555; then
+    log_error "Failed to enable TCP/IP mode on device."
+    exit 1
+fi
 sleep 2
 
 # --- STEP 4: INSTALLING SCRIPTS ---
@@ -262,6 +309,51 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+# --- Cleanup on exit ---
+cleanup_on_exit() {
+    # Cleanup function for trap
+    exit 0
+}
+
+trap cleanup_on_exit INT TERM
+
+# --- Validation Functions ---
+
+validate_ip() {
+    local ip="$1"
+    # Basic IPv4 validation regex
+    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        # Check each octet is 0-255
+        IFS='.' read -ra ADDR <<< "$ip"
+        for i in "${ADDR[@]}"; do
+            if [[ $i -lt 0 || $i -gt 255 ]]; then
+                return 1
+            fi
+        done
+        return 0
+    fi
+    return 1
+}
+
+check_dependencies() {
+    local missing=()
+    
+    if ! command -v adb >/dev/null 2>&1; then
+        missing+=("adb")
+    fi
+    
+    if ! command -v scrcpy >/dev/null 2>&1 && [ ! -f /snap/bin/scrcpy ]; then
+        missing+=("scrcpy")
+    fi
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo -e "${RED}Error:${NC} Missing dependencies: ${missing[*]}"
+        echo "Please install them first."
+        return 1
+    fi
+    return 0
+}
 
 # --- Config Management ---
 
@@ -329,6 +421,12 @@ find_scrcpy() {
 # --- Commands ---
 
 cmd_start() {
+    # Check dependencies first
+    if ! check_dependencies; then
+        notify "critical" "Android Camera" "Missing dependencies" "error"
+        return 1
+    fi
+    
     load_config
     
     if is_running; then
@@ -342,12 +440,23 @@ cmd_start() {
         notify "critical" "Android Camera" "Config Error: No IP set" "error"
         return 1
     fi
+    
+    # Validate IP format
+    if ! validate_ip "$PHONE_IP"; then
+        echo -e "${RED}Error:${NC} Invalid IP address format: $PHONE_IP"
+        notify "critical" "Android Camera" "Invalid IP address" "error"
+        return 1
+    fi
 
     echo -e "${BLUE}Connecting to $PHONE_IP...${NC}"
     notify "normal" "Android Camera" "⌛ Connecting..."
 
     # Connection attempt
-    adb connect "$PHONE_IP:5555" > /dev/null
+    if ! adb connect "$PHONE_IP:5555" > /dev/null 2>&1; then
+        echo -e "${RED}Error:${NC} Failed to connect to $PHONE_IP:5555"
+        notify "critical" "Android Camera" "Connection failed" "error"
+        return 1
+    fi
     
     SCRCPY_BIN=$(find_scrcpy)
     if [ -z "$SCRCPY_BIN" ]; then
@@ -372,9 +481,39 @@ cmd_start() {
     
     CMD+=("--v4l2-sink=/dev/video0")
     
-    # Split EXTRA_ARGS string into array
-    IFS=' ' read -r -a EXTRA_ARGS_ARRAY <<< "$EXTRA_ARGS"
-    CMD+=("${EXTRA_ARGS_ARRAY[@]}")
+    # Parse EXTRA_ARGS safely to prevent command injection
+    # Security: Validate and parse without using eval
+    if [ ! -z "$EXTRA_ARGS" ]; then
+        # Check for dangerous characters that could enable command injection
+        if [[ "$EXTRA_ARGS" =~ [\;\|\&\`\$\(\)\<\>] ]]; then
+            echo -e "${RED}Error:${NC} EXTRA_ARGS contains unsafe characters (; | & ` $ etc.). Only use scrcpy arguments."
+            notify "critical" "Android Camera" "Unsafe config detected" "error"
+            return 1
+        fi
+        
+        # Safe parsing: split by spaces and validate each argument
+        # This approach is safe because we validate before adding to array
+        IFS=' ' read -r -a EXTRA_ARGS_ARRAY <<< "$EXTRA_ARGS"
+        for arg in "${EXTRA_ARGS_ARRAY[@]}"; do
+            # Remove surrounding quotes if present (safe string manipulation)
+            arg="${arg#\"}"
+            arg="${arg%\"}"
+            arg="${arg#\'}"
+            arg="${arg%\'}"
+            
+            # Additional safety check: ensure no dangerous patterns
+            if [[ "$arg" =~ [\;\|\&\`\$] ]]; then
+                echo -e "${RED}Error:${NC} Unsafe argument detected: $arg"
+                notify "critical" "Android Camera" "Unsafe argument in config" "error"
+                return 1
+            fi
+            
+            # Only add non-empty arguments
+            if [ ! -z "$arg" ]; then
+                CMD+=("$arg")
+            fi
+        done
+    fi
 
     echo "Executing: ${CMD[*]}"
     
@@ -383,7 +522,7 @@ cmd_start() {
     PID=$!
     
     sleep 3
-    if ps -p $PID > /dev/null; then
+    if ps -p $PID > /dev/null 2>&1; then
         echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
         notify "normal" "Android Camera" "✅ Active (PID: $PID)"
     else
@@ -412,13 +551,32 @@ cmd_toggle() {
 }
 
 cmd_fix() {
-    notify-send -i smartphone "Camera Setup" "🔌 Connect USB Cable..." "smartphone"
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${RED}Error:${NC} adb not found!"
+        notify "critical" "Camera Setup" "adb not found" "error"
+        return 1
+    fi
+    
+    notify "normal" "Camera Setup" "🔌 Connect USB Cable..." "smartphone"
     echo -e "${BLUE}Waiting for USB device...${NC}"
-    adb wait-for-usb-device
+    echo "Press Ctrl+C to cancel"
+    
+    # Handle interruption
+    if ! adb wait-for-usb-device; then
+        echo -e "${YELLOW}Cancelled.${NC}"
+        notify "low" "Camera Setup" "Cancelled" "smartphone"
+        return 1
+    fi
+    
     echo "Device connected. Enabling TCP/IP mode..."
-    adb tcpip 5555
-    echo -e "${GREEN}Done! You can disconnect USB now.${NC}"
-    notify-send -i smartphone "Camera Setup" "✅ Fixed! Unplug USB." "smartphone"
+    if adb tcpip 5555; then
+        echo -e "${GREEN}Done! You can disconnect USB now.${NC}"
+        notify "normal" "Camera Setup" "✅ Fixed! Unplug USB." "smartphone"
+    else
+        echo -e "${RED}Error:${NC} Failed to enable TCP/IP mode"
+        notify "critical" "Camera Setup" "Failed to enable TCP/IP" "error"
+        return 1
+    fi
 }
 
 cmd_status() {
@@ -439,6 +597,21 @@ cmd_status() {
     echo "Camera Facing:  $CAMERA_FACING"
     echo "Video Size:     ${VIDEO_SIZE:-Max}"
     echo "Bitrate:        $BIT_RATE"
+    
+    # Check dependencies
+    echo ""
+    echo -e "--- ${BLUE}Dependencies${NC} ---"
+    if command -v adb >/dev/null 2>&1; then
+        echo -e "adb: ${GREEN}OK${NC}"
+    else
+        echo -e "adb: ${RED}NOT FOUND${NC}"
+    fi
+    
+    if command -v scrcpy >/dev/null 2>&1 || [ -f /snap/bin/scrcpy ]; then
+        echo -e "scrcpy: ${GREEN}OK${NC}"
+    else
+        echo -e "scrcpy: ${RED}NOT FOUND${NC}"
+    fi
 }
 
 cmd_config() {
@@ -483,6 +656,7 @@ EXTRA_ARGS="--no-audio --buffer=400"
 EOF
 else
     log_info "Updating IP in existing config..."
+    # File exists (we're in the else block), so update it
     sed -i "s|PHONE_IP=.*|PHONE_IP=\"$PHONE_IP\"|" "$CONFIG_FILE"
 fi
 
