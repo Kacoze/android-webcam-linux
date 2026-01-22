@@ -784,12 +784,12 @@ cmd_start() {
         # Extract all numbers and find the maximum
         max_dim="0"
         for num in $digits_only; do
-            if [ ! -z "$num" ] && [ "$num" -gt "$max_dim" ] 2>/dev/null; then
+            if [ ! -z "$num" ] && (( 10#$num > 10#$max_dim )) 2>/dev/null; then
                 max_dim="$num"
             fi
         done
         
-        if [ ! -z "$max_dim" ] && [ "$max_dim" -gt 0 ] 2>/dev/null; then
+        if [ ! -z "$max_dim" ] && (( 10#$max_dim > 0 )) 2>/dev/null; then
             CMD+=("--max-size=$max_dim")
         else
             echo -e "${YELLOW}Warning:${NC} Invalid VIDEO_SIZE format. Use a number (e.g., 1080) or leave empty."
