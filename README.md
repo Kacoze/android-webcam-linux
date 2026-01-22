@@ -23,7 +23,7 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 
 1.  **System:** Linux (tested on Ubuntu 22.04 / 24.04, Debian, Mint, Pop!_OS, Arch Linux, Manjaro, Fedora, openSUSE, and others).
 2.  **Phone:** Android 5.0 or newer.
-3.  **Network:** Computer and phone must be on the same Wi-Fi network (for wireless operation after initial setup).
+3.  **Network:** After initial USB pairing, computer and phone must be on the same Wi-Fi network for wireless operation. USB connection is only required for the initial setup and re-pairing after phone restart.
 4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this automatically).
 5.  **Privileges:** ⚠️ **Administrator access (sudo) is required** for installing system packages and kernel modules. The installer will prompt for your password.
 6.  **Internet:** ⚠️ **Active internet connection is required ONLY during installation** for:
@@ -31,6 +31,12 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
     - Downloading `scrcpy` from GitHub Releases (if not available via package manager, Snap, or Flatpak)
     
     **Note:** After installation, the tool works completely offline. No internet connection is needed for daily use.
+
+### Hardware Requirements
+
+- **Kernel:** Linux kernel 3.6 or newer (for v4l2loopback support)
+- **Secure Boot:** If enabled, you may need to disable it or sign the v4l2loopback module (see FAQ section)
+- **USB:** USB cable for initial pairing (any standard USB cable works)
 
 ### 📱 Step 0: Phone Preparation (One-time only)
 
@@ -106,14 +112,34 @@ When you want to join a call:
 
 **To turn off:** Simply click the **📷 Camera Phone** icon again or use the notification action.
 
-### 2. Advanced Controls (Right-Click)
+### 2. Application Examples
+
+The camera appears as **Android Cam** (device `/dev/video10`) in applications:
+
+**OBS Studio:**
+1. Open OBS Studio
+2. Add Source → Video Capture Device
+3. Select "Android Cam" or "/dev/video10"
+
+**Zoom / Microsoft Teams:**
+1. Open video settings
+2. Select camera: "Android Cam" or "/dev/video10"
+
+**Discord:**
+1. User Settings → Voice & Video
+2. Camera: Select "Android Cam"
+
+**Chrome/Chromium (for web apps):**
+The camera should appear automatically as "Android Cam" in browser permission dialogs.
+
+### 3. Advanced Controls (Right-Click)
 
 Right-click the **Camera Phone** icon to access:
 - **Settings**: Opening the configuration file allows you to change back/front camera, resolution, etc.
 - **Check Status**: See if the camera is running and check current settings.
 - **Fix Connection**: Quick access to USB re-pairing tool.
 
-### 3. Emergency Situation (After Phone Restart)
+### 4. Emergency Situation (After Phone Restart)
 
 If you restarted your phone or the battery died, Android disables wireless debugging access for security reasons.
 
@@ -245,6 +271,98 @@ No. Internet is only required **during installation** for:
 After installation, the tool works completely offline. It only needs:
 - Your phone and computer on the same Wi-Fi network (for wireless connection)
 - Or USB cable connection (for initial pairing)
+
+---
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### "v4l2loopback module not found" or "/dev/video10 missing"
+
+**Symptoms:** Camera not visible in Zoom/Teams/OBS, or error message about missing video device.
+
+**Solutions:**
+1. Check if module is loaded:
+   ```bash
+   lsmod | grep v4l2loopback
+   ```
+2. If empty, try loading manually:
+   ```bash
+   sudo modprobe v4l2loopback
+   ```
+3. If this fails with "Required key not available", Secure Boot is enabled. See FAQ section for Secure Boot solutions.
+
+#### "scrcpy: command not found" or "scrcpy version too old"
+
+**Symptoms:** Camera fails to start, error about scrcpy not being found or version being too old.
+
+**Solutions:**
+1. Check scrcpy version (see FAQ section for commands)
+2. Install/update scrcpy:
+   - Snap: `sudo snap install scrcpy`
+   - Flatpak: `flatpak install flathub org.scrcpy.ScrCpy`
+   - Or download from: https://github.com/Genymobile/scrcpy/releases
+3. Re-run the installer to auto-detect the new installation
+
+#### "Connection refused" when starting camera
+
+**Symptoms:** Camera fails to start, error about connection being refused.
+
+**Solutions:**
+1. **Check if phone and computer are on the same Wi-Fi network** - they must be on the same network for wireless connection to work.
+2. **Verify phone's IP address** - the IP might have changed. Run:
+   ```bash
+   android-webcam-ctl status
+   ```
+   to see the current configuration.
+3. **Re-run the pairing process** - use the "Fix Camera (USB)" icon or run:
+   ```bash
+   android-webcam-ctl fix
+   ```
+   Then connect via USB cable and follow the prompts.
+4. **Test ADB connection manually**:
+   ```bash
+   adb connect YOUR_PHONE_IP:5555
+   ```
+   Replace `YOUR_PHONE_IP` with your phone's actual IP address.
+
+#### "Required key not available" (Secure Boot)
+
+**Symptoms:** `sudo modprobe v4l2loopback` fails with Secure Boot error.
+
+**Solutions:**
+See FAQ section "What to do when Secure Boot blocks the v4l2loopback module?" for detailed instructions.
+
+#### Camera shows black screen or no video
+
+**Symptoms:** Camera appears in applications but shows black screen or no video.
+
+**Solutions:**
+1. Check if camera is actually running:
+   ```bash
+   android-webcam-ctl status
+   ```
+2. Check phone's camera permissions - ensure camera app works on phone
+3. Try restarting the camera:
+   ```bash
+   android-webcam-ctl stop
+   android-webcam-ctl start
+   ```
+4. Check logs: `/tmp/android-cam.log`
+
+#### Poor quality or lagging video
+
+**Symptoms:** Video quality is poor or stuttering.
+
+**Solutions:**
+1. Ensure phone and computer are on the same Wi-Fi network (preferably 5GHz)
+2. Check Wi-Fi signal strength - weak signal can cause stuttering
+3. Try increasing bitrate in config (higher = better quality, more latency):
+   ```bash
+   android-webcam-ctl config
+   # Edit BIT_RATE="8M" to higher value like "12M" or "16M"
+   ```
 
 ---
 

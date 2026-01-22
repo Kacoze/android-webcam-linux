@@ -194,7 +194,15 @@ install_deps() {
 }
 
 if ! install_deps; then
-    log_warn "Dependency installation had issues. Trying to proceed..."
+    log_error "Dependency installation failed!"
+    echo ""
+    echo "Critical dependencies may be missing. The installation may fail."
+    read -r -p "Do you want to continue anyway? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_error "Installation aborted by user."
+        exit 1
+    fi
+    log_warn "Continuing with potentially missing dependencies..."
 fi
 
 # --- STEP 1.5: SCRCPY INSTALLATION ---
@@ -238,14 +246,126 @@ version_compare() {
     [ "$sorted" = "$required" ]
 }
 
-ensure_scrcpy() {
-    local REQUIRED_VER="2.0"
-    local scrcpy_bin=""
-    local current_ver="0.0"
-    local temp_file=""
-    local extract_dir=""
+# Install scrcpy via Snap
+install_scrcpy_snap() {
+    local REQUIRED_VER="$1"
+    if ! command -v snap >/dev/null 2>&1; then
+        return 1
+    fi
     
-    # Cleanup function for temporary files on exit/interrupt
+    log_info "Attempting to install scrcpy via Snap..."
+    if sudo snap install scrcpy 2>/dev/null; then
+        sudo snap connect scrcpy:camera 2>/dev/null || true
+        sudo snap connect scrcpy:raw-usb 2>/dev/null || true
+        sleep 2
+        if [ -f /snap/bin/scrcpy ]; then
+            local scrcpy_bin="/snap/bin/scrcpy"
+            local current_ver=$(check_scrcpy_version "$scrcpy_bin")
+            if version_compare "$REQUIRED_VER" "$current_ver"; then
+                log_success "Installed scrcpy v$current_ver via Snap"
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
+# Install scrcpy via Flatpak
+install_scrcpy_flatpak() {
+    local REQUIRED_VER="$1"
+    if ! command -v flatpak >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    log_info "Attempting to install scrcpy via Flatpak..."
+    if flatpak install -y flathub org.scrcpy.ScrCpy 2>/dev/null; then
+        # Verify installation succeeded
+        if flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+            local scrcpy_bin="flatpak run org.scrcpy.ScrCpy"
+            # Flatpak version check
+            local current_ver
+            if command -v head >/dev/null 2>&1; then
+                current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0")
+            else
+                current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "0.0")
+            fi
+            if version_compare "$REQUIRED_VER" "$current_ver"; then
+                log_success "Installed scrcpy v$current_ver via Flatpak"
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
+# Install scrcpy from GitHub Releases
+install_scrcpy_github() {
+    local REQUIRED_VER="$1"
+    
+    # Check required tools
+    if ! command -v curl >/dev/null 2>&1; then
+        log_warn "curl not found, skipping GitHub download method."
+        return 1
+    fi
+    if ! command -v tar >/dev/null 2>&1; then
+        log_warn "tar not found, skipping GitHub download method."
+        return 1
+    fi
+    if ! command -v mktemp >/dev/null 2>&1; then
+        log_warn "mktemp not found, skipping GitHub download method."
+        return 1
+    fi
+    if ! command -v find >/dev/null 2>&1; then
+        log_warn "find not found, skipping GitHub download method."
+        return 1
+    fi
+    
+    log_info "Attempting to download scrcpy from GitHub Releases..."
+    
+    # Detect architecture
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="x86_64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        armv7l|armv6l) arch="armv7" ;;
+        *) arch="x86_64" ;; # fallback
+    esac
+    
+    local download_dir="$HOME/.local/bin"
+    mkdir -p "$download_dir"
+    
+    # Get latest release URL
+    local latest_url
+    if echo "test" | grep -o "test" >/dev/null 2>&1; then
+        if command -v head >/dev/null 2>&1; then
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | head -n 1)
+        else
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | sed -n '1p')
+        fi
+    else
+        # Fallback using sed (more portable)
+        if command -v head >/dev/null 2>&1; then
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | head -n 1)
+        else
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | sed -n '1p')
+        fi
+    fi
+    
+    if [ -z "$latest_url" ]; then
+        return 1
+    fi
+    
+    # Download and extract
+    local temp_file extract_dir
+    temp_file=$(mktemp)
+    if [ -z "$temp_file" ] || [ ! -f "$temp_file" ]; then
+        log_warn "Failed to create temporary file, skipping GitHub download..."
+        return 1
+    fi
+    
+    # Cleanup function
+    local cleanup_temp_files
     cleanup_temp_files() {
         if [ ! -z "$extract_dir" ] && [ -d "$extract_dir" ]; then
             rm -rf "$extract_dir" 2>/dev/null
@@ -255,15 +375,89 @@ ensure_scrcpy() {
         fi
     }
     
-    # Set trap for cleanup on interrupt
     trap cleanup_temp_files INT TERM EXIT
+    
+    log_info "Downloading scrcpy from GitHub..."
+    if ! curl -L -f -s "$latest_url" -o "$temp_file" 2>/dev/null; then
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
+    
+    # Validate downloaded file
+    if [ ! -s "$temp_file" ]; then
+        log_warn "Downloaded file is empty, skipping..."
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
+    
+    extract_dir=$(mktemp -d)
+    if [ -z "$extract_dir" ] || [ ! -d "$extract_dir" ]; then
+        log_warn "Failed to create temporary directory, skipping..."
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
+    
+    if ! tar -xf "$temp_file" -C "$extract_dir" 2>/dev/null; then
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
+    
+    # Find scrcpy binary in extracted directory
+    local found_bin
+    if command -v head >/dev/null 2>&1; then
+        found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | head -n 1)
+    else
+        found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | sed -n '1p')
+    fi
+    
+    if [ -z "$found_bin" ]; then
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
+    
+    if ! cp "$found_bin" "$download_dir/scrcpy" 2>/dev/null; then
+        log_warn "Failed to copy scrcpy binary, skipping..."
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
+    
+    if ! chmod +x "$download_dir/scrcpy" 2>/dev/null; then
+        log_warn "Failed to make scrcpy executable, skipping..."
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
+    
+    local scrcpy_bin="$download_dir/scrcpy"
+    local current_ver=$(check_scrcpy_version "$scrcpy_bin")
+    if version_compare "$REQUIRED_VER" "$current_ver"; then
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        log_success "Downloaded and installed scrcpy v$current_ver to $download_dir"
+        return 0
+    fi
+    
+    cleanup_temp_files
+    trap - INT TERM EXIT
+    return 1
+}
+
+ensure_scrcpy() {
+    local REQUIRED_VER="2.0"
+    local scrcpy_bin=""
+    local current_ver="0.0"
     
     # Check if scrcpy already exists and is compatible
     if command -v scrcpy >/dev/null 2>&1; then
         scrcpy_bin=$(command -v scrcpy)
         current_ver=$(check_scrcpy_version "$scrcpy_bin")
         if version_compare "$REQUIRED_VER" "$current_ver"; then
-            trap - INT TERM EXIT  # Remove trap before return
             log_success "Found compatible scrcpy v$current_ver at $scrcpy_bin"
             return 0
         else
@@ -276,147 +470,25 @@ ensure_scrcpy() {
         scrcpy_bin="/snap/bin/scrcpy"
         current_ver=$(check_scrcpy_version "$scrcpy_bin")
         if version_compare "$REQUIRED_VER" "$current_ver"; then
-            trap - INT TERM EXIT  # Remove trap before return
             log_success "Found compatible scrcpy v$current_ver (snap)"
             return 0
         fi
     fi
     
     # Try installing via Snap
-    if command -v snap >/dev/null 2>&1; then
-        log_info "Attempting to install scrcpy via Snap..."
-        if sudo snap install scrcpy 2>/dev/null; then
-            sudo snap connect scrcpy:camera 2>/dev/null || true
-            sudo snap connect scrcpy:raw-usb 2>/dev/null || true
-            sleep 2
-            if [ -f /snap/bin/scrcpy ]; then
-                scrcpy_bin="/snap/bin/scrcpy"
-                current_ver=$(check_scrcpy_version "$scrcpy_bin")
-                if version_compare "$REQUIRED_VER" "$current_ver"; then
-                    trap - INT TERM EXIT  # Remove trap before return
-                    log_success "Installed scrcpy v$current_ver via Snap"
-                    return 0
-                fi
-            fi
-        fi
+    if install_scrcpy_snap "$REQUIRED_VER"; then
+        return 0
     fi
     
     # Try installing via Flatpak
-    if command -v flatpak >/dev/null 2>&1; then
-        log_info "Attempting to install scrcpy via Flatpak..."
-        if flatpak install -y flathub org.scrcpy.ScrCpy 2>/dev/null; then
-            # Verify installation succeeded
-            if flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
-                scrcpy_bin="flatpak run org.scrcpy.ScrCpy"
-                # Flatpak version check
-                if command -v head >/dev/null 2>&1; then
-                    current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0")
-                else
-                    current_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "0.0")
-                fi
-                if version_compare "$REQUIRED_VER" "$current_ver"; then
-                    trap - INT TERM EXIT  # Remove trap before return
-                    log_success "Installed scrcpy v$current_ver via Flatpak"
-                    return 0
-                fi
-            fi
-        fi
+    if install_scrcpy_flatpak "$REQUIRED_VER"; then
+        return 0
     fi
     
     # Try downloading from GitHub Releases
-    if ! command -v curl >/dev/null 2>&1; then
-        log_warn "curl not found, skipping GitHub download method."
-    elif ! command -v tar >/dev/null 2>&1; then
-        log_warn "tar not found, skipping GitHub download method."
-    elif ! command -v mktemp >/dev/null 2>&1; then
-        log_warn "mktemp not found, skipping GitHub download method."
-    elif ! command -v find >/dev/null 2>&1; then
-        log_warn "find not found, skipping GitHub download method."
-    else
-        log_info "Attempting to download scrcpy from GitHub Releases..."
-        local arch
-        arch=$(uname -m)
-        case "$arch" in
-            x86_64) arch="x86_64" ;;
-            aarch64|arm64) arch="arm64" ;;
-            armv7l|armv6l) arch="armv7" ;;
-            *) arch="x86_64" ;; # fallback
-        esac
-        
-        local download_dir="$HOME/.local/bin"
-        mkdir -p "$download_dir"
-        
-        # Get latest release URL
-        # Use sed as fallback if grep -o is not available
-        local latest_url
-        if echo "test" | grep -o "test" >/dev/null 2>&1; then
-            if command -v head >/dev/null 2>&1; then
-                latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | head -n 1)
-            else
-                latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | sed -n '1p')
-            fi
-        else
-            # Fallback using sed (more portable)
-            if command -v head >/dev/null 2>&1; then
-                latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | head -n 1)
-            else
-                latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | sed -n '1p')
-            fi
-        fi
-        
-        if [ ! -z "$latest_url" ]; then
-            log_info "Downloading scrcpy from GitHub..."
-            temp_file=$(mktemp)
-            if [ -z "$temp_file" ] || [ ! -f "$temp_file" ]; then
-                log_warn "Failed to create temporary file, skipping GitHub download..."
-                cleanup_temp_files
-            elif curl -L -f -s "$latest_url" -o "$temp_file" 2>/dev/null; then
-                # Validate downloaded file (check size > 0)
-                if [ ! -s "$temp_file" ]; then
-                    log_warn "Downloaded file is empty, skipping..."
-                    cleanup_temp_files
-                else
-                    extract_dir=$(mktemp -d)
-                    if [ -z "$extract_dir" ] || [ ! -d "$extract_dir" ]; then
-                        log_warn "Failed to create temporary directory, skipping..."
-                        cleanup_temp_files
-                    elif tar -xf "$temp_file" -C "$extract_dir" 2>/dev/null; then
-                        # Find scrcpy binary in extracted directory
-                        local found_bin
-                        if command -v head >/dev/null 2>&1; then
-                            found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | head -n 1)
-                        else
-                            found_bin=$(find "$extract_dir" -name "scrcpy" -type f -executable | sed -n '1p')
-                        fi
-                        if [ ! -z "$found_bin" ]; then
-                            if ! cp "$found_bin" "$download_dir/scrcpy" 2>/dev/null; then
-                                log_warn "Failed to copy scrcpy binary, skipping..."
-                                cleanup_temp_files
-                            elif ! chmod +x "$download_dir/scrcpy" 2>/dev/null; then
-                                log_warn "Failed to make scrcpy executable, skipping..."
-                                cleanup_temp_files
-                            else
-                                scrcpy_bin="$download_dir/scrcpy"
-                                current_ver=$(check_scrcpy_version "$scrcpy_bin")
-                                if version_compare "$REQUIRED_VER" "$current_ver"; then
-                                    cleanup_temp_files
-                                    trap - INT TERM EXIT  # Remove trap after success
-                                    log_success "Downloaded and installed scrcpy v$current_ver to $download_dir"
-                                    return 0
-                                fi
-                            fi
-                        fi
-                    fi
-                    cleanup_temp_files
-                fi
-            else
-                cleanup_temp_files
-            fi
-        fi
+    if install_scrcpy_github "$REQUIRED_VER"; then
+        return 0
     fi
-    
-    # Remove trap before exit
-    trap - INT TERM EXIT
     
     # If we get here, nothing worked
     log_error "Failed to install scrcpy >= v$REQUIRED_VER"
@@ -426,11 +498,25 @@ ensure_scrcpy() {
     echo "  - Flatpak: flatpak install flathub org.scrcpy.ScrCpy"
     echo "  - Or download from: https://github.com/Genymobile/scrcpy/releases"
     echo ""
-    read -r -p "Press Enter to continue anyway (camera may not work)..."
+    read -r -p "Do you want to continue installation anyway? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_error "Installation aborted. Please install scrcpy manually and run installer again."
+        return 1
+    fi
+    log_warn "Continuing without scrcpy. Camera will not work until scrcpy is installed."
     return 1
 }
 
-ensure_scrcpy
+if ! ensure_scrcpy; then
+    log_error "scrcpy installation failed!"
+    echo ""
+    read -r -p "Do you want to continue installation anyway? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_error "Installation aborted. Please install scrcpy manually and run installer again."
+        exit 1
+    fi
+    log_warn "Continuing without scrcpy. Camera will not work until scrcpy is installed."
+fi
 
 # --- STEP 2: KERNEL MODULE ---
 echo -e "\n${GREEN}[2/5] Configuring V4L2 Module...${NC}"
@@ -1086,20 +1172,14 @@ mkdir -p "$CONFIG_DIR"
 # Only create if doesn't exist to respect user edits on re-install
 if [ ! -f "$CONFIG_FILE" ]; then
     log_info "Creating initial configuration..."
-    # Additional safety check: ensure IP doesn't contain dangerous characters for heredoc
+    # Additional safety check: ensure IP doesn't contain dangerous characters
     # (IP is already validated, but this is defense in depth)
     if [[ "$PHONE_IP" =~ [\"\`\$] ]]; then
         log_warn "IP contains unsafe characters. Clearing IP for safety."
         PHONE_IP=""
     fi
-    cat << EOF > "$CONFIG_FILE"
-# Android Webcam Configuration
-PHONE_IP="$PHONE_IP"
-CAMERA_FACING="back"
-VIDEO_SIZE=""
-BIT_RATE="8M"
-EXTRA_ARGS="--no-audio --buffer=400"  # Additional scrcpy arguments
-EOF
+    # Use printf for safe file creation instead of heredoc with interpolation
+    printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --buffer=400"  # Additional scrcpy arguments\n' "$PHONE_IP" > "$CONFIG_FILE"
 else
     log_info "Updating IP in existing config..."
     # File exists (we're in the else block), so update it
@@ -1123,7 +1203,8 @@ cat << EOF > "$APP_DIR/android-cam.desktop"
 Version=1.0
 Name=Camera Phone
 Comment=Toggle Android Camera
-Exec="$BIN_DIR/android-webcam-ctl" toggle
+Exec=android-webcam-ctl toggle
+Path=$HOME/.local/bin
 Icon=camera-web
 Terminal=false
 Type=Application
@@ -1132,17 +1213,20 @@ Actions=Status;Config;Fix;
 
 [Desktop Action Status]
 Name=Check Status
-Exec=bash -c "\"$BIN_DIR/android-webcam-ctl\" status; read -r -p 'Press Enter...' "
+Exec=sh -c 'android-webcam-ctl status; read -r -p "Press Enter...";'
+Path=$HOME/.local/bin
 Terminal=true
 
 [Desktop Action Config]
 Name=Settings
-Exec="$BIN_DIR/android-webcam-ctl" config
+Exec=android-webcam-ctl config
+Path=$HOME/.local/bin
 Terminal=true
 
 [Desktop Action Fix]
 Name=Fix Connection (USB)
-Exec="$BIN_DIR/android-webcam-ctl" fix
+Exec=android-webcam-ctl fix
+Path=$HOME/.local/bin
 Terminal=true
 EOF
 
