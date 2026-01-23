@@ -579,6 +579,12 @@ if ! grep -q "Android Cam" "$CONF_FILE" 2>/dev/null; then
     if ! echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee "$CONF_FILE" > /dev/null; then
         log_error "Failed to create module configuration file."
         log_warn "Continuing anyway, but module may not work properly..."
+    else
+        # Verify configuration was created correctly
+        if ! grep -q "video_nr=10" "$CONF_FILE" 2>/dev/null; then
+            log_warn "Configuration file exists but video_nr is incorrect. Fixing..."
+            echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee "$CONF_FILE" > /dev/null
+        fi
     fi
     if ! echo "v4l2loopback" | sudo tee "$LOAD_FILE" > /dev/null; then
         log_error "Failed to create module load file."
@@ -601,6 +607,12 @@ if ! grep -q "Android Cam" "$CONF_FILE" 2>/dev/null; then
     fi
 else
     log_success "Module check passed."
+    # Configuration exists, but verify it has correct video_nr
+    if ! grep -q "video_nr=10" "$CONF_FILE" 2>/dev/null; then
+        log_warn "Configuration file has incorrect video_nr. Fixing..."
+        echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee "$CONF_FILE" > /dev/null
+        log_success "Configuration fixed."
+    fi
     # Verify module is loaded
     if ! lsmod | grep -q v4l2loopback; then
         log_warn "Module configuration exists but module is not loaded."
@@ -634,6 +646,19 @@ if ! adb wait-for-usb-device; then
 fi
 
 log_success "Device connected!"
+
+# Get USB device ID (in case there are multiple devices)
+USB_DEVICE_ID=""
+DEVICE_COUNT=$(adb devices 2>/dev/null | grep -v "List" | grep -c "device" || echo "0")
+if [ "$DEVICE_COUNT" -gt 1 ]; then
+    log_info "Multiple devices detected. Selecting USB device..."
+    # Get the first USB device (usually the one we just connected)
+    USB_DEVICE_ID=$(adb devices 2>/dev/null | grep -v "List" | grep "device" | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+    if [ ! -z "$USB_DEVICE_ID" ]; then
+        log_info "Using device: $USB_DEVICE_ID"
+    fi
+fi
+
 log_info "Detecting Wi-Fi IP address..."
 
 PHONE_IP=""
@@ -641,7 +666,12 @@ PHONE_IP=""
 if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
     # Method 1: Try common Wi-Fi interface names first (fast path)
     for iface in wlan0 swlan0 wlan1 wlan2 wifi0; do
-        IP=$(adb shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]')
+        IP=""
+        if [ ! -z "$USB_DEVICE_ID" ]; then
+            IP=$(adb -s "$USB_DEVICE_ID" shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
+        else
+            IP=$(adb shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
+        fi
         if [ ! -z "$IP" ]; then
             # Validate IP format
             if validate_ip "$IP"; then
@@ -656,7 +686,12 @@ if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
     if [ -z "$PHONE_IP" ]; then
         log_info "Scanning all network interfaces..."
         # Get all interfaces with IPv4 addresses
-        ALL_IPS=$(adb shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1)
+        ALL_IPS=""
+        if [ ! -z "$USB_DEVICE_ID" ]; then
+            ALL_IPS=$(adb -s "$USB_DEVICE_ID" shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
+        else
+            ALL_IPS=$(adb shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
+        fi
         
         if [ ! -z "$ALL_IPS" ]; then
             # Process each interface
@@ -715,7 +750,14 @@ else
 fi
 
 if [ -z "$PHONE_IP" ]; then
-    log_warn "Could not auto-detect Wi-Fi IP."
+    log_warn "Could not auto-detect Wi-Fi IP address."
+    echo ""
+    echo "This may happen if:"
+    echo "  - Phone is not connected to Wi-Fi"
+    echo "  - Phone and computer are on different networks"
+    echo "  - ADB cannot access network interface information"
+    echo ""
+    log_info "Please enter the phone's Wi-Fi IP address manually."
     while true; do
         read -r -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
         # Validate IP format
@@ -724,12 +766,22 @@ if [ -z "$PHONE_IP" ]; then
         fi
         log_error "Invalid IP address format. Please try again."
     done
+    log_success "Using manually entered IP: $PHONE_IP"
 fi
 
 # Enable TCP/IP
-if ! adb tcpip 5555; then
-    log_error "Failed to enable TCP/IP mode on device."
-    exit 1
+if [ ! -z "$USB_DEVICE_ID" ]; then
+    log_info "Enabling TCP/IP mode on device $USB_DEVICE_ID..."
+    if ! adb -s "$USB_DEVICE_ID" tcpip 5555; then
+        log_error "Failed to enable TCP/IP mode on device."
+        exit 1
+    fi
+else
+    log_info "Enabling TCP/IP mode..."
+    if ! adb tcpip 5555; then
+        log_error "Failed to enable TCP/IP mode on device."
+        exit 1
+    fi
 fi
 sleep 2
 
@@ -1031,8 +1083,16 @@ cmd_start() {
         
         # Try loading with configuration file (if exists)
         if [ -f /etc/modprobe.d/v4l2loopback.conf ]; then
+            # Check if configuration has correct video_nr=10
+            if ! grep -q "video_nr=10" /etc/modprobe.d/v4l2loopback.conf 2>/dev/null; then
+                echo -e "${YELLOW}Configuration file has incorrect video_nr. Fixing...${NC}"
+                if command -v sudo >/dev/null 2>&1; then
+                    echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee /etc/modprobe.d/v4l2loopback.conf > /dev/null 2>&1
+                    echo -e "${GREEN}Configuration fixed.${NC}"
+                fi
+            fi
             if sudo modprobe v4l2loopback 2>/dev/null; then
-                sleep 1
+                sleep 2
                 if [ -c /dev/video10 ]; then
                     success=true
                     echo -e "${GREEN}Module loaded successfully using configuration file.${NC}"
@@ -1045,12 +1105,23 @@ cmd_start() {
         if [ "$success" = false ]; then
             echo -e "${BLUE}Trying to load module with direct parameters...${NC}"
             if sudo modprobe v4l2loopback video_nr=10 card_label="Android Cam" exclusive_caps=1 2>/dev/null; then
-                sleep 1
-                if [ -c /dev/video10 ]; then
-                    success=true
-                    echo -e "${GREEN}Module loaded successfully with direct parameters.${NC}"
-                    notify "normal" "Android Camera" "Module loaded" "camera-web"
+                sleep 2
+                # Verify module is loaded
+                if lsmod | grep -q v4l2loopback 2>/dev/null; then
+                    if [ -c /dev/video10 ]; then
+                        success=true
+                        echo -e "${GREEN}Module loaded successfully with direct parameters.${NC}"
+                        notify "normal" "Android Camera" "Module loaded" "camera-web"
+                    else
+                        echo -e "${YELLOW}Module loaded but /dev/video10 not found. Checking existing devices...${NC}"
+                        if command -v ls >/dev/null 2>&1; then
+                            echo "Existing video devices:"
+                            ls -la /dev/video* 2>/dev/null || echo "No video devices found"
+                        fi
+                    fi
                 fi
+            else
+                echo -e "${YELLOW}Failed to load module. This may require administrator privileges.${NC}"
             fi
         fi
         
@@ -1210,14 +1281,37 @@ cmd_fix() {
         return 1
     fi
     
+    # Get USB device ID (in case there are multiple devices)
+    local usb_device_id=""
+    local device_count
+    device_count=$(adb devices 2>/dev/null | grep -v "List" | grep -c "device" || echo "0")
+    if [ "$device_count" -gt 1 ]; then
+        echo -e "${BLUE}Multiple devices detected. Selecting USB device...${NC}"
+        usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep "device" | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+        if [ ! -z "$usb_device_id" ]; then
+            echo -e "${BLUE}Using device: $usb_device_id${NC}"
+        fi
+    fi
+    
     echo "Device connected. Enabling TCP/IP mode..."
-    if adb tcpip 5555; then
-        echo -e "${GREEN}Done! You can disconnect USB now.${NC}"
-        notify "normal" "Camera Setup" "✅ Fixed! Unplug USB." "smartphone"
+    if [ ! -z "$usb_device_id" ]; then
+        if adb -s "$usb_device_id" tcpip 5555; then
+            echo -e "${GREEN}Done! You can disconnect USB now.${NC}"
+            notify "normal" "Camera Setup" "✅ Fixed! Unplug USB." "smartphone"
+        else
+            echo -e "${RED}Error:${NC} Failed to enable TCP/IP mode"
+            notify "critical" "Camera Setup" "Failed to enable TCP/IP" "error"
+            return 1
+        fi
     else
-        echo -e "${RED}Error:${NC} Failed to enable TCP/IP mode"
-        notify "critical" "Camera Setup" "Failed to enable TCP/IP" "error"
-        return 1
+        if adb tcpip 5555; then
+            echo -e "${GREEN}Done! You can disconnect USB now.${NC}"
+            notify "normal" "Camera Setup" "✅ Fixed! Unplug USB." "smartphone"
+        else
+            echo -e "${RED}Error:${NC} Failed to enable TCP/IP mode"
+            notify "critical" "Camera Setup" "Failed to enable TCP/IP" "error"
+            return 1
+        fi
     fi
 }
 
