@@ -171,7 +171,7 @@ uninstall() {
 }
 
 # --- ARGUMENT PARSING ---
-case "$1" in
+case "${1:-}" in
     --uninstall|-u) uninstall ;;
     --help|-h) 
         print_banner
