@@ -806,7 +806,7 @@ LOG_FILE="/tmp/android-cam.log"
 DEFAULT_CAMERA_FACING="back" # front, back, external
 DEFAULT_VIDEO_SIZE=""        # e.g. 1080 (max dimension in pixels, empty = max supported)
 DEFAULT_BIT_RATE="8M"
-DEFAULT_ARGS="--no-audio --buffer=400"
+DEFAULT_ARGS="--no-audio --v4l2-buffer=400"
 
 # Colors
 GREEN='\033[0;32m'
@@ -1064,48 +1064,93 @@ cmd_start() {
             return 1
         fi
         
+        # Check if sudo can work without password
+        local sudo_nopasswd=false
+        if sudo -n true 2>/dev/null; then
+            sudo_nopasswd=true
+        fi
+        
         # Check if module is loaded
         local module_loaded=false
         if lsmod | grep -q v4l2loopback 2>/dev/null; then
             module_loaded=true
-            echo -e "${BLUE}Module is loaded but /dev/video10 missing. Reloading with correct parameters...${NC}"
+            echo -e "${BLUE}Module is loaded but /dev/video10 missing. Attempting to fix...${NC}"
         else
             echo -e "${BLUE}Module not loaded. Loading with correct parameters...${NC}"
+        fi
+        
+        # Always fix configuration first (even if file exists)
+        echo -e "${BLUE}Ensuring configuration is correct...${NC}"
+        if command -v sudo >/dev/null 2>&1; then
+            echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee /etc/modprobe.d/v4l2loopback.conf > /dev/null 2>&1
+            echo -e "${GREEN}Configuration verified.${NC}"
         fi
         
         # Try to reload/load module using configuration file first
         local success=false
         if [ "$module_loaded" = true ]; then
-            # Unload module first
-            sudo modprobe -r v4l2loopback 2>/dev/null || true
-            sleep 1
-        fi
-        
-        # Try loading with configuration file (if exists)
-        if [ -f /etc/modprobe.d/v4l2loopback.conf ]; then
-            # Check if configuration has correct video_nr=10
-            if ! grep -q "video_nr=10" /etc/modprobe.d/v4l2loopback.conf 2>/dev/null; then
-                echo -e "${YELLOW}Configuration file has incorrect video_nr. Fixing...${NC}"
-                if command -v sudo >/dev/null 2>&1; then
-                    echo "options v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1" | sudo tee /etc/modprobe.d/v4l2loopback.conf > /dev/null 2>&1
-                    echo -e "${GREEN}Configuration fixed.${NC}"
+            # Try to unload module first (only if sudo doesn't require password)
+            if [ "$sudo_nopasswd" = true ]; then
+                echo -e "${BLUE}Attempting to unload module...${NC}"
+                if sudo modprobe -r v4l2loopback 2>/dev/null; then
+                    echo -e "${GREEN}Module unloaded.${NC}"
+                    sleep 2
+                else
+                    echo -e "${YELLOW}Warning: Could not unload module (may be in use). Trying alternative approach...${NC}"
+                    sleep 1
+                fi
+            else
+                # Sudo requires password - try to load additional device without unloading
+                echo -e "${YELLOW}Note: sudo requires password. Trying to create additional device without unloading module...${NC}"
+                echo -e "${BLUE}Attempting to load module with multiple devices (devices=2 video_nr=0,10)...${NC}"
+                if sudo modprobe v4l2loopback devices=2 video_nr=0,10 card_label="Android Cam","Android Cam" exclusive_caps=1,1 2>/dev/null; then
+                    sleep 3
+                    if [ -c /dev/video10 ]; then
+                        success=true
+                        echo -e "${GREEN}Additional device /dev/video10 created successfully.${NC}"
+                        notify "normal" "Android Camera" "Module loaded" "camera-web"
+                    else
+                        echo -e "${YELLOW}Module load command succeeded but /dev/video10 not found.${NC}"
+                    fi
+                else
+                    echo -e "${YELLOW}Could not load module with multiple devices (requires password or module doesn't support it).${NC}"
                 fi
             fi
-            if sudo modprobe v4l2loopback 2>/dev/null; then
-                sleep 2
-                if [ -c /dev/video10 ]; then
-                    success=true
-                    echo -e "${GREEN}Module loaded successfully using configuration file.${NC}"
-                    notify "normal" "Android Camera" "Module loaded" "camera-web"
+        fi
+        
+        # Try loading with configuration file (only if module was unloaded or not loaded)
+        if [ "$success" = false ] && [ "$module_loaded" = false ] || [ "$sudo_nopasswd" = true ]; then
+            if [ -f /etc/modprobe.d/v4l2loopback.conf ]; then
+                echo -e "${BLUE}Loading module using configuration file...${NC}"
+                if sudo modprobe v4l2loopback 2>/dev/null; then
+                    sleep 3
+                    # Verify module is actually loaded
+                    if lsmod | grep -q v4l2loopback 2>/dev/null; then
+                        if [ -c /dev/video10 ]; then
+                            success=true
+                            echo -e "${GREEN}Module loaded successfully using configuration file.${NC}"
+                            notify "normal" "Android Camera" "Module loaded" "camera-web"
+                        else
+                            echo -e "${YELLOW}Module loaded but /dev/video10 not found. Checking existing devices...${NC}"
+                            if command -v ls >/dev/null 2>&1; then
+                                echo "Existing video devices:"
+                                ls -la /dev/video* 2>/dev/null || echo "No video devices found"
+                            fi
+                        fi
+                    else
+                        echo -e "${YELLOW}Module load command succeeded but module not found in lsmod.${NC}"
+                    fi
+                else
+                    echo -e "${YELLOW}Failed to load module using configuration file.${NC}"
                 fi
             fi
         fi
         
-        # If configuration didn't work, try direct parameters
-        if [ "$success" = false ]; then
+        # If configuration didn't work, try direct parameters (only if module was unloaded or not loaded)
+        if [ "$success" = false ] && ([ "$module_loaded" = false ] || [ "$sudo_nopasswd" = true ]); then
             echo -e "${BLUE}Trying to load module with direct parameters...${NC}"
             if sudo modprobe v4l2loopback video_nr=10 card_label="Android Cam" exclusive_caps=1 2>/dev/null; then
-                sleep 2
+                sleep 3
                 # Verify module is loaded
                 if lsmod | grep -q v4l2loopback 2>/dev/null; then
                     if [ -c /dev/video10 ]; then
@@ -1119,9 +1164,11 @@ cmd_start() {
                             ls -la /dev/video* 2>/dev/null || echo "No video devices found"
                         fi
                     fi
+                else
+                    echo -e "${YELLOW}Module load command succeeded but module not found in lsmod.${NC}"
                 fi
             else
-                echo -e "${YELLOW}Failed to load module. This may require administrator privileges.${NC}"
+                echo -e "${YELLOW}Failed to load module. This may require administrator privileges or Secure Boot may be enabled.${NC}"
             fi
         fi
         
@@ -1129,13 +1176,93 @@ cmd_start() {
         if [ "$success" = false ] || [ ! -c /dev/video10 ]; then
             echo -e "${RED}Error:${NC} Failed to create /dev/video10."
             echo ""
+            echo "Diagnostic information:"
+            echo "--- Module status ---"
+            if lsmod | grep -q v4l2loopback 2>/dev/null; then
+                echo "Module is loaded: $(lsmod | grep v4l2loopback | head -1)"
+            else
+                echo "Module is NOT loaded"
+            fi
+            echo ""
+            echo "--- Existing video devices ---"
+            if command -v ls >/dev/null 2>&1; then
+                ls -la /dev/video* 2>/dev/null || echo "No video devices found"
+            else
+                echo "Cannot list video devices (ls not available)"
+            fi
+            echo ""
+            echo "--- Module configuration ---"
+            if [ -f /etc/modprobe.d/v4l2loopback.conf ]; then
+                cat /etc/modprobe.d/v4l2loopback.conf
+            else
+                echo "Configuration file does not exist"
+            fi
+            echo ""
             echo "Troubleshooting steps:"
-            echo "1. Check if module is loaded: lsmod | grep v4l2loopback"
-            echo "2. Check existing video devices: ls -la /dev/video*"
-            echo "3. Try loading manually: sudo modprobe v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1"
-            echo "4. If Secure Boot is enabled, you may need to disable it or sign the module"
-            echo "5. Check module configuration: cat /etc/modprobe.d/v4l2loopback.conf"
-            notify "critical" "Android Camera" "Video device not found" "error"
+            if [ "$sudo_nopasswd" = false ]; then
+                echo "1. Sudo requires password. You need to manually fix this:"
+                echo "   sudo modprobe -r v4l2loopback"
+                echo "   sudo modprobe v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1"
+                echo "   OR configure sudo to work without password for modprobe commands"
+            else
+                echo "1. Try unloading and reloading manually:"
+                echo "   sudo modprobe -r v4l2loopback"
+                echo "   sudo modprobe v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1"
+            fi
+            echo "2. Check if /dev/video10 was created: ls -la /dev/video10"
+            echo "3. If Secure Boot is enabled, you may need to disable it or sign the module"
+            echo "4. If module cannot be unloaded, try rebooting the system"
+            if [ "$module_loaded" = true ] && [ "$sudo_nopasswd" = false ]; then
+                echo ""
+                echo "Note: Module is already loaded but with wrong parameters. Since sudo requires"
+                echo "password, automatic fix is not possible. Please run the commands above manually."
+            fi
+            
+            # Prepare notification message with instructions
+            local notify_msg=""
+            if [ "$sudo_nopasswd" = false ]; then
+                notify_msg="Sudo requires password. Run manually:\nsudo modprobe -r v4l2loopback\nsudo modprobe v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1"
+            else
+                notify_msg="Run manually:\nsudo modprobe -r v4l2loopback\nsudo modprobe v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1"
+            fi
+            
+            # Send notification with instructions
+            local short_msg=""
+            if [ "$sudo_nopasswd" = false ]; then
+                short_msg="Video device not found. Sudo requires password - run commands manually (see dialog/terminal)"
+            else
+                short_msg="Video device not found. Check terminal for fix instructions"
+            fi
+            notify "critical" "Android Camera" "$short_msg" "error"
+            
+            # Try to show instructions in a dialog if available
+            if command -v zenity >/dev/null 2>&1; then
+                zenity --error --title="Android Camera - Video Device Not Found" --text="Failed to create /dev/video10.
+
+Module is loaded but with wrong parameters.
+
+To fix this, run in terminal:
+sudo modprobe -r v4l2loopback
+sudo modprobe v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1
+
+Or reboot your system." 2>/dev/null || true
+            elif command -v kdialog >/dev/null 2>&1; then
+                kdialog --error "Failed to create /dev/video10.
+
+Module is loaded but with wrong parameters.
+
+To fix this, run in terminal:
+sudo modprobe -r v4l2loopback
+sudo modprobe v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1
+
+Or reboot your system." 2>/dev/null || true
+            else
+                # Fallback: send another notification with more details
+                if command -v notify-send >/dev/null 2>&1; then
+                    notify-send -u critical -i error -t 10000 "Android Camera - Fix Required" "Run: sudo modprobe -r v4l2loopback && sudo modprobe v4l2loopback video_nr=10" 2>/dev/null || true
+                fi
+            fi
+            
             return 1
         fi
     fi
@@ -1145,6 +1272,12 @@ cmd_start() {
     # Parse EXTRA_ARGS safely to prevent command injection
     # Security: Validate and parse without using eval
     if [ ! -z "$EXTRA_ARGS" ]; then
+        # Convert deprecated --buffer= to --v4l2-buffer= for backward compatibility
+        if [[ "$EXTRA_ARGS" =~ --buffer= ]]; then
+            EXTRA_ARGS=$(echo "$EXTRA_ARGS" | sed 's/--buffer=/--v4l2-buffer=/g')
+            echo -e "${YELLOW}Note:${NC} Converted deprecated --buffer= to --v4l2-buffer= for scrcpy compatibility"
+        fi
+        
         # Check for dangerous characters that could enable command injection
         if [[ "$EXTRA_ARGS" =~ [\;\|\&\`\$\(\)\<\>] ]]; then
             echo -e "${RED}Error:${NC} EXTRA_ARGS contains unsafe characters (; | & \` $ etc.). Only use scrcpy arguments."
@@ -1445,7 +1578,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
         PHONE_IP=""
     fi
     # Use printf for safe file creation instead of heredoc with interpolation
-    printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --buffer=400"  # Additional scrcpy arguments\n' "$PHONE_IP" > "$CONFIG_FILE"
+    printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments\n' "$PHONE_IP" > "$CONFIG_FILE"
 else
     log_info "Updating IP in existing config..."
     # File exists (we're in the else block), so update it

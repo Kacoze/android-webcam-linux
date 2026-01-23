@@ -166,7 +166,7 @@ PHONE_IP="192.168.1.50"   # Your phone's Wi-Fi IP address
 CAMERA_FACING="back"      # Options: front, back, external
 VIDEO_SIZE=""             # Max dimension in pixels (e.g., "1080" for 1080p), leave empty for max resolution
 BIT_RATE="8M"             # Higher = better quality, more latency
-EXTRA_ARGS="--no-audio --buffer=400"  # Additional scrcpy arguments
+EXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments
 ```
 
 ### Example Configurations
@@ -177,7 +177,7 @@ PHONE_IP="192.168.1.50"
 CAMERA_FACING="back"
 VIDEO_SIZE="1080"
 BIT_RATE="12M"
-EXTRA_ARGS="--no-audio --buffer=400"
+EXTRA_ARGS="--no-audio --v4l2-buffer=400"
 ```
 
 **Low Latency (720p, 4Mbps):**
@@ -186,7 +186,7 @@ PHONE_IP="192.168.1.50"
 CAMERA_FACING="back"
 VIDEO_SIZE="720"
 BIT_RATE="4M"
-EXTRA_ARGS="--no-audio --buffer=200"
+EXTRA_ARGS="--no-audio --v4l2-buffer=200"
 ```
 
 **Front Camera (Selfie Mode):**
@@ -195,7 +195,7 @@ PHONE_IP="192.168.1.50"
 CAMERA_FACING="front"
 VIDEO_SIZE="1080"
 BIT_RATE="8M"
-EXTRA_ARGS="--no-audio --buffer=400"
+EXTRA_ARGS="--no-audio --v4l2-buffer=400"
 ```
 
 **Maximum Quality (No Resolution Limit):**
@@ -204,7 +204,7 @@ PHONE_IP="192.168.1.50"
 CAMERA_FACING="back"
 VIDEO_SIZE=""              # Empty = maximum supported resolution
 BIT_RATE="16M"             # High bitrate for best quality
-EXTRA_ARGS="--no-audio --buffer=400"
+EXTRA_ARGS="--no-audio --v4l2-buffer=400"
 ```
 
 **Note:** After changing configuration, restart the camera (stop and start) for changes to take effect.
