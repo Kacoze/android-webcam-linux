@@ -26,7 +26,8 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 3.  **Network:** After initial USB pairing, computer and phone must be on the same Wi-Fi network for wireless operation. USB connection is only required for the initial setup and re-pairing after phone restart.
 4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this automatically).
 5.  **Privileges:** ⚠️ **Administrator access (sudo) is required** for installing system packages and kernel modules. The installer will prompt for your password.
-6.  **Internet:** ⚠️ **Active internet connection is required ONLY during installation** for:
+6.  **Permissions:** Your user should be in the `video` group to access `/dev/video*` devices. This is usually automatic on most distributions, but you can verify with `groups | grep video`. If not present, add yourself with `sudo usermod -aG video $USER` and log out/in.
+7.  **Internet:** ⚠️ **Active internet connection is required ONLY during installation** for:
     - Downloading system dependencies (via package manager)
     - Downloading `scrcpy` from GitHub Releases (if not available via package manager, Snap, or Flatpak)
     
@@ -167,6 +168,46 @@ VIDEO_SIZE=""             # Max dimension in pixels (e.g., "1080" for 1080p), le
 BIT_RATE="8M"             # Higher = better quality, more latency
 EXTRA_ARGS="--no-audio --buffer=400"  # Additional scrcpy arguments
 ```
+
+### Example Configurations
+
+**High Quality (1080p, 12Mbps):**
+```bash
+PHONE_IP="192.168.1.50"
+CAMERA_FACING="back"
+VIDEO_SIZE="1080"
+BIT_RATE="12M"
+EXTRA_ARGS="--no-audio --buffer=400"
+```
+
+**Low Latency (720p, 4Mbps):**
+```bash
+PHONE_IP="192.168.1.50"
+CAMERA_FACING="back"
+VIDEO_SIZE="720"
+BIT_RATE="4M"
+EXTRA_ARGS="--no-audio --buffer=200"
+```
+
+**Front Camera (Selfie Mode):**
+```bash
+PHONE_IP="192.168.1.50"
+CAMERA_FACING="front"
+VIDEO_SIZE="1080"
+BIT_RATE="8M"
+EXTRA_ARGS="--no-audio --buffer=400"
+```
+
+**Maximum Quality (No Resolution Limit):**
+```bash
+PHONE_IP="192.168.1.50"
+CAMERA_FACING="back"
+VIDEO_SIZE=""              # Empty = maximum supported resolution
+BIT_RATE="16M"             # High bitrate for best quality
+EXTRA_ARGS="--no-audio --buffer=400"
+```
+
+**Note:** After changing configuration, restart the camera (stop and start) for changes to take effect.
 
 ---
 

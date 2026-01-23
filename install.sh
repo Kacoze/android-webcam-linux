@@ -70,6 +70,54 @@ check_path() {
     fi
 }
 
+check_sudo() {
+    # Check if running as root
+    if [ "$EUID" -eq 0 ]; then
+        log_warn "Running as root. Consider running as regular user with sudo."
+        return 0
+    fi
+    
+    # Check if sudo is available
+    if ! command -v sudo >/dev/null 2>&1; then
+        log_error "sudo not found and not running as root."
+        log_error "This script requires administrator privileges."
+        exit 1
+    fi
+    
+    # Test sudo access
+    if ! sudo -n true 2>/dev/null; then
+        log_info "This script requires administrator privileges."
+        log_info "You will be prompted for your password."
+        # Test with a harmless command
+        if ! sudo -v; then
+            log_error "Failed to obtain sudo privileges."
+            exit 1
+        fi
+    fi
+}
+
+check_video_group() {
+    # Check if user is in video group
+    if command -v groups >/dev/null 2>&1; then
+        if ! groups | grep -q video 2>/dev/null; then
+            log_warn "User '$USER' is not in 'video' group."
+            log_warn "You may not have access to /dev/video* devices."
+            echo -e "To fix this, run: ${YELLOW}sudo usermod -aG video $USER${NC}"
+            echo -e "Then ${YELLOW}log out and log back in${NC} for changes to take effect."
+            sleep 3
+        fi
+    elif command -v id >/dev/null 2>&1; then
+        # Fallback using id command
+        if ! id -nG 2>/dev/null | grep -q video 2>/dev/null; then
+            log_warn "User '$USER' is not in 'video' group."
+            log_warn "You may not have access to /dev/video* devices."
+            echo -e "To fix this, run: ${YELLOW}sudo usermod -aG video $USER${NC}"
+            echo -e "Then ${YELLOW}log out and log back in${NC} for changes to take effect."
+            sleep 3
+        fi
+    fi
+}
+
 validate_ip() {
     local ip="$1"
     # Basic IPv4 validation regex
@@ -140,8 +188,10 @@ esac
 # =============================================================================
 
 print_banner
+check_sudo
 check_internet
 check_path
+check_video_group
 
 DISTRO=$(detect_distro)
 # Capitalize first letter (compatible with both GNU sed and BSD sed)
@@ -587,9 +637,10 @@ log_success "Device connected!"
 log_info "Detecting Wi-Fi IP address..."
 
 PHONE_IP=""
-# Check if awk and cut are available for auto-detection
+# Improved IP detection: try multiple methods
 if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
-    for iface in wlan0 swlan0 wlan1 wlan2; do
+    # Method 1: Try common Wi-Fi interface names first (fast path)
+    for iface in wlan0 swlan0 wlan1 wlan2 wifi0; do
         IP=$(adb shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]')
         if [ ! -z "$IP" ]; then
             # Validate IP format
@@ -600,6 +651,65 @@ if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
             fi
         fi
     done
+    
+    # Method 2: If not found, enumerate all interfaces and find Wi-Fi ones
+    if [ -z "$PHONE_IP" ]; then
+        log_info "Scanning all network interfaces..."
+        # Get all interfaces with IPv4 addresses
+        ALL_IPS=$(adb shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1)
+        
+        if [ ! -z "$ALL_IPS" ]; then
+            # Process each interface
+            while IFS= read -r line || [ -n "$line" ]; do
+                if [ -z "$line" ]; then
+                    continue
+                fi
+                # Extract interface name and IP
+                iface=$(echo "$line" | cut -d: -f1 | tr -d '[:space:]')
+                IP=$(echo "$line" | cut -d: -f2 | tr -d '[:space:]')
+                
+                # Skip loopback and non-Wi-Fi interfaces (heuristic: wlan, wifi, wlp in name)
+                if [[ "$iface" == "lo" ]] || [[ "$iface" == "lo:"* ]]; then
+                    continue
+                fi
+                
+                # Check if interface name suggests Wi-Fi (wlan, wifi, wlp, etc.)
+                if [[ "$iface" =~ ^(wlan|wifi|wlp|swlan) ]] || [[ "$iface" =~ (wlan|wifi|wlp) ]]; then
+                    if [ ! -z "$IP" ] && validate_ip "$IP"; then
+                        PHONE_IP="$IP"
+                        log_success "Found IP ($iface): $PHONE_IP"
+                        break
+                    fi
+                fi
+            done <<< "$ALL_IPS"
+        fi
+        
+        # Method 3: If still not found, try any non-loopback interface with valid IP
+        if [ -z "$PHONE_IP" ] && [ ! -z "$ALL_IPS" ]; then
+            log_info "Trying any available network interface..."
+            while IFS= read -r line || [ -n "$line" ]; do
+                if [ -z "$line" ]; then
+                    continue
+                fi
+                iface=$(echo "$line" | cut -d: -f1 | tr -d '[:space:]')
+                IP=$(echo "$line" | cut -d: -f2 | tr -d '[:space:]')
+                
+                # Skip loopback
+                if [[ "$iface" == "lo" ]] || [[ "$iface" == "lo:"* ]]; then
+                    continue
+                fi
+                
+                if [ ! -z "$IP" ] && validate_ip "$IP"; then
+                    # Check if it's a private IP (likely local network)
+                    if [[ "$IP" =~ ^10\. ]] || [[ "$IP" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] || [[ "$IP" =~ ^192\.168\. ]]; then
+                        PHONE_IP="$IP"
+                        log_success "Found IP ($iface): $PHONE_IP"
+                        break
+                    fi
+                fi
+            done <<< "$ALL_IPS"
+        fi
+    fi
 else
     log_warn "awk or cut not found, skipping auto-detection."
 fi
