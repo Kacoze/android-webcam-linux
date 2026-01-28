@@ -668,7 +668,7 @@ echo " 2. USB Debugging:  ENABLED (In Developer Options)"
 echo " 3. RSA Prompt:     ACCEPTED (On phone screen)"
 echo "---------------------------------------------------"
 log_info "Waiting for device..."
-if ! adb wait-for-usb-device; then
+if ! adb wait-for-usb-device </dev/null; then
     log_error "Failed to detect device or operation cancelled."
     exit 1
 fi
@@ -677,11 +677,11 @@ log_success "Device connected!"
 
 # Get USB device ID (in case there are multiple devices)
 USB_DEVICE_ID=""
-DEVICE_COUNT=$(adb devices 2>/dev/null | grep -v "List" | grep -c "device" || echo "0")
+DEVICE_COUNT=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep -c "device" || echo "0")
 if [ "$DEVICE_COUNT" -gt 1 ]; then
     log_info "Multiple devices detected. Selecting USB device..."
     # Get the first USB device (usually the one we just connected)
-    USB_DEVICE_ID=$(adb devices 2>/dev/null | grep -v "List" | grep "device" | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+    USB_DEVICE_ID=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep "device" | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
     if [ ! -z "$USB_DEVICE_ID" ]; then
         log_info "Using device: $USB_DEVICE_ID"
     fi
@@ -696,9 +696,9 @@ if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
     for iface in wlan0 swlan0 wlan1 wlan2 wifi0; do
         IP=""
         if [ ! -z "$USB_DEVICE_ID" ]; then
-            IP=$(adb -s "$USB_DEVICE_ID" shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
+            IP=$(adb -s "$USB_DEVICE_ID" shell ip -4 -o addr show "$iface" </dev/null 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
         else
-            IP=$(adb shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
+            IP=$(adb shell ip -4 -o addr show "$iface" </dev/null 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
         fi
         if [ ! -z "$IP" ]; then
             # Validate IP format
@@ -716,9 +716,9 @@ if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
         # Get all interfaces with IPv4 addresses
         ALL_IPS=""
         if [ ! -z "$USB_DEVICE_ID" ]; then
-            ALL_IPS=$(adb -s "$USB_DEVICE_ID" shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
+            ALL_IPS=$(adb -s "$USB_DEVICE_ID" shell ip -4 -o addr show </dev/null 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
         else
-            ALL_IPS=$(adb shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
+            ALL_IPS=$(adb shell ip -4 -o addr show </dev/null 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
         fi
         
         if [ ! -z "$ALL_IPS" ]; then
@@ -800,13 +800,13 @@ fi
 # Enable TCP/IP
 if [ ! -z "$USB_DEVICE_ID" ]; then
     log_info "Enabling TCP/IP mode on device $USB_DEVICE_ID..."
-    if ! adb -s "$USB_DEVICE_ID" tcpip 5555; then
+    if ! adb -s "$USB_DEVICE_ID" tcpip 5555 </dev/null; then
         log_error "Failed to enable TCP/IP mode on device."
         exit 1
     fi
 else
     log_info "Enabling TCP/IP mode..."
-    if ! adb tcpip 5555; then
+    if ! adb tcpip 5555 </dev/null; then
         log_error "Failed to enable TCP/IP mode on device."
         exit 1
     fi
