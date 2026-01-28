@@ -21,10 +21,10 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 
 ## ⚙️ Requirements
 
-1.  **System:** Linux (tested on Ubuntu 22.04 / 24.04, Debian, Mint, Pop!_OS, Arch Linux, Manjaro, Fedora, openSUSE, and others).
-2.  **Phone:** Android 5.0 or newer.
+1.  **System:** Linux (tested on Ubuntu 22.04 / 24.04, Debian, Mint, Pop!_OS, KDE Neon, Arch Linux, Manjaro, Fedora, openSUSE, and others).
+2.  **Phone:** Android 12 or newer (required for camera mirroring via `scrcpy --video-source=camera`).
 3.  **Network:** After initial USB pairing, computer and phone must be on the same Wi-Fi network for wireless operation. USB connection is only required for the initial setup and re-pairing after phone restart.
-4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this automatically).
+4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this automatically). On Ubuntu/Debian, the package manager provides scrcpy &lt; 2.0, so the installer will use Snap, Flatpak, or a direct download from GitHub instead.
 5.  **Privileges:** ⚠️ **Administrator access (sudo) is required** for installing system packages and kernel modules. The installer will prompt for your password.
 6.  **Permissions:** Your user should be in the `video` group to access `/dev/video*` devices. This is usually automatic on most distributions, but you can verify with `groups | grep video`. If not present, add yourself with `sudo usermod -aG video $USER` and log out/in.
 7.  **Internet:** ⚠️ **Active internet connection is required ONLY during installation** for:
@@ -121,7 +121,7 @@ The camera should appear automatically as "Android Cam" in browser permission di
 
 Right-click the **Camera Phone** icon to access:
 - **Settings**: Opening the configuration file allows you to change back/front camera, resolution, etc.
-- **Check Status**: See if the camera is running and check current settings.
+- **Check Status**: See if the camera is running and check current settings. A terminal window opens; press Enter to close it.
 - **Fix Connection**: Quick access to USB re-pairing tool.
 
 ### 4. Emergency Situation (After Phone Restart)
@@ -416,6 +416,7 @@ bash /tmp/install.sh --uninstall
 ```bash
 # Remove script (installed to /usr/local/bin), config, and icons
 sudo rm -f /usr/local/bin/android-webcam-ctl
+sudo rm -f /usr/local/bin/android-webcam-common
 rm -f ~/.local/bin/android-webcam-ctl   # legacy location, if any
 rm -rf ~/.config/android-webcam
 rm -f ~/.local/share/applications/android-cam.desktop

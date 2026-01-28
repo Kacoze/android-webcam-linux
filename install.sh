@@ -172,6 +172,7 @@ uninstall() {
     
     log_info "Removing files..."
     sudo rm -f /usr/local/bin/android-webcam-ctl
+    sudo rm -f /usr/local/bin/android-webcam-common
     rm -f "$HOME/.local/bin/android-webcam-ctl"   # cleanup legacy (old install location)
     rm -f "$HOME/.local/bin/android-cam-toggle.sh" # cleanup legacy
     rm -f "$HOME/.local/bin/android-cam-fix.sh"    # cleanup legacy
@@ -180,6 +181,22 @@ uninstall() {
     rm -f "$HOME/.local/share/applications/android-cam-fix.desktop"
     
     log_success "Files removed."
+    
+    # Optional: remove scrcpy if installed via Snap or Flatpak by this tool
+    if command -v snap >/dev/null 2>&1 && snap list 2>/dev/null | grep -q "^scrcpy "; then
+        echo "scrcpy is installed via Snap."
+        prompt_read "Remove scrcpy (Snap)? (y/N): " snap_confirm
+        if [[ "$snap_confirm" == "y" || "$snap_confirm" == "Y" ]]; then
+            sudo snap remove scrcpy 2>/dev/null || true
+        fi
+    fi
+    if command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+        echo "scrcpy is installed via Flatpak."
+        prompt_read "Remove scrcpy (Flatpak)? (y/N): " fp_confirm
+        if [[ "$fp_confirm" == "y" || "$fp_confirm" == "Y" ]]; then
+            flatpak uninstall -y org.scrcpy.ScrCpy 2>/dev/null || true
+        fi
+    fi
     
     echo "Do you want to remove system dependencies (scrcpy, v4l2loopback etc.)?"
     prompt_read "Remove packages? (y/N): " pkg_confirm
@@ -531,6 +548,13 @@ ensure_scrcpy() {
     local scrcpy_bin=""
     local current_ver="0.0"
     
+    # On Ubuntu/Debian, apt has scrcpy < 2.0; installer will use Snap/Flatpak/GitHub
+    case "$DISTRO" in
+        ubuntu|debian|pop|linuxmint|kali|neon|zorin)
+            log_info "On Ubuntu/Debian, apt provides scrcpy < 2.0. Installing via Snap, Flatpak, or GitHub..."
+            ;;
+    esac
+    
     # Check if scrcpy already exists and is compatible
     if command -v scrcpy >/dev/null 2>&1; then
         scrcpy_bin=$(command -v scrcpy)
@@ -677,11 +701,12 @@ log_success "Device connected!"
 
 # Get USB device ID (in case there are multiple devices)
 USB_DEVICE_ID=""
-DEVICE_COUNT=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep -c "device" || echo "0")
+# Count only lines with second column "device" (exclude offline/unauthorized)
+DEVICE_COUNT=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
 if [ "$DEVICE_COUNT" -gt 1 ]; then
     log_info "Multiple devices detected. Selecting USB device..."
-    # Get the first USB device (usually the one we just connected)
-    USB_DEVICE_ID=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep "device" | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+    # Get the first connected device (second column must be "device")
+    USB_DEVICE_ID=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
     if [ ! -z "$USB_DEVICE_ID" ]; then
         log_info "Using device: $USB_DEVICE_ID"
     fi
@@ -819,6 +844,48 @@ echo -e "\n${GREEN}[4/5] Installing Control Scripts...${NC}"
 BIN_DIR="/usr/local/bin"
 sudo mkdir -p "$BIN_DIR"
 
+log_info "Installing android-webcam-common to $BIN_DIR..."
+
+TMP_COMMON=$(mktemp) || { log_error "Failed to create temp file for common."; exit 1; }
+cat << 'COMMONEOF' > "$TMP_COMMON"
+#!/bin/bash
+# android-webcam-common - shared functions for android-webcam-ctl
+
+validate_ip() {
+    local ip="$1"
+    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        IFS='.' read -ra ADDR <<< "$ip"
+        for i in "${ADDR[@]}"; do
+            if (( 10#$i < 0 || 10#$i > 255 )); then
+                return 1
+            fi
+        done
+        return 0
+    fi
+    return 1
+}
+
+find_scrcpy() {
+    if command -v scrcpy >/dev/null 2>&1; then
+        echo "$(command -v scrcpy)"
+    elif [ -f /snap/bin/scrcpy ]; then
+        echo "/snap/bin/scrcpy"
+    elif [ -f "$HOME/.local/bin/scrcpy" ]; then
+        echo "$HOME/.local/bin/scrcpy"
+    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+        echo "flatpak run org.scrcpy.ScrCpy"
+    else
+        return 1
+    fi
+}
+COMMONEOF
+if ! sudo install -m 0644 "$TMP_COMMON" "$BIN_DIR/android-webcam-common"; then
+    log_error "Failed to install android-webcam-common to $BIN_DIR!"
+    rm -f "$TMP_COMMON"
+    exit 1
+fi
+rm -f "$TMP_COMMON"
+
 log_info "Installing android-webcam-ctl to $BIN_DIR..."
 
 TMP_CTL=$(mktemp) || { log_error "Failed to create temp file."; exit 1; }
@@ -832,6 +899,7 @@ cat << 'EOF' > "$TMP_CTL"
 CONFIG_DIR="$HOME/.config/android-webcam"
 CONFIG_FILE="$CONFIG_DIR/settings.conf"
 LOG_FILE="/tmp/android-cam.log"
+PID_FILE="$CONFIG_DIR/scrcpy.pid"
 
 # Default configuration values
 DEFAULT_CAMERA_FACING="back" # front, back, external
@@ -846,6 +914,14 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Load shared functions (validate_ip, find_scrcpy)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ ! -f "$SCRIPT_DIR/android-webcam-common" ]; then
+    echo -e "${RED}Error:${NC} android-webcam-common not found. Reinstall the tool."
+    exit 1
+fi
+. "$SCRIPT_DIR/android-webcam-common"
+
 # --- Cleanup on exit ---
 cleanup_on_exit() {
     # Cleanup function for trap (no exit - let script handle exit codes)
@@ -854,23 +930,7 @@ cleanup_on_exit() {
 
 trap cleanup_on_exit INT TERM
 
-# --- Validation Functions ---
-
-validate_ip() {
-    local ip="$1"
-    # Basic IPv4 validation regex
-    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        # Check each octet is 0-255
-        IFS='.' read -ra ADDR <<< "$ip"
-        for i in "${ADDR[@]}"; do
-            if (( 10#$i < 0 || 10#$i > 255 )); then
-                return 1
-            fi
-        done
-        return 0
-    fi
-    return 1
-}
+# --- Validation / Helpers ---
 
 check_dependencies() {
     local missing=()
@@ -969,26 +1029,20 @@ notify() {
 }
 
 is_running() {
-    # Check if scrcpy process is running
+    # Prefer PID file (reliable for Flatpak/Snap/normal)
+    if [ -f "$PID_FILE" ]; then
+        local pid
+        read -r pid < "$PID_FILE" 2>/dev/null
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "$PID_FILE" 2>/dev/null
+    fi
+    # Fallback: pgrep/ps (may miss Flatpak process name)
     if command -v pgrep >/dev/null 2>&1; then
         pgrep -f "scrcpy.*video-source=camera" > /dev/null
     elif command -v ps >/dev/null 2>&1; then
         ps aux 2>/dev/null | grep -q "[s]crcpy.*video-source=camera"
-    else
-        # Fallback: try to find process by PID file or return false
-        return 1
-    fi
-}
-
-find_scrcpy() {
-    if command -v scrcpy >/dev/null 2>&1; then
-        echo "$(command -v scrcpy)"
-    elif [ -f /snap/bin/scrcpy ]; then
-        echo "/snap/bin/scrcpy"
-    elif [ -f "$HOME/.local/bin/scrcpy" ]; then
-        echo "$HOME/.local/bin/scrcpy"
-    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
-        echo "flatpak run org.scrcpy.ScrCpy"
     else
         return 1
     fi
@@ -1358,6 +1412,12 @@ Or reboot your system." 2>/dev/null || true
         disown 2>/dev/null || true
     fi
     
+    # Write PID file for reliable stop (Flatpak/Snap/normal)
+    if [ ! -z "$PID" ]; then
+        mkdir -p "$CONFIG_DIR"
+        echo "$PID" > "$PID_FILE" 2>/dev/null || true
+    fi
+    
     sleep 3
     # Check if process is still running
     if [ ! -z "$PID" ] && command -v ps >/dev/null 2>&1; then
@@ -1365,6 +1425,7 @@ Or reboot your system." 2>/dev/null || true
             echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
             notify "normal" "Android Camera" "✅ Active (PID: $PID)"
         else
+            rm -f "$PID_FILE" 2>/dev/null
             echo -e "${RED}Failed to start.${NC} Check $LOG_FILE"
             # Show first 5 lines of log file (use sed as fallback if head is not available)
             if command -v head >/dev/null 2>&1; then
@@ -1384,34 +1445,34 @@ Or reboot your system." 2>/dev/null || true
 }
 
 cmd_stop() {
+    local was_running=false
+    is_running && was_running=true
+
+    # Prefer PID file (reliable for Flatpak/Snap/normal)
+    if [ -f "$PID_FILE" ]; then
+        local pid
+        read -r pid < "$PID_FILE" 2>/dev/null
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE" 2>/dev/null
+    fi
+    # Fallback: pkill/pgrep if still running (e.g. no PID file)
     if is_running; then
-        # Stop scrcpy process
         if command -v pkill >/dev/null 2>&1; then
             pkill -f "scrcpy.*video-source=camera" 2>/dev/null || true
         elif command -v ps >/dev/null 2>&1 && command -v kill >/dev/null 2>&1; then
-            # Fallback: find and kill process manually
             local pid
             if command -v awk >/dev/null 2>&1; then
-                if command -v head >/dev/null 2>&1; then
-                    pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | head -n 1)
-                else
-                    pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | sed -n '1p')
-                fi
+                pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | awk '{print $2}' | head -n 1)
             else
-                # Fallback: extract PID using cut
-                if command -v head >/dev/null 2>&1; then
-                    pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | tr -s ' ' | cut -d' ' -f2 | head -n 1)
-                else
-                    pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | tr -s ' ' | cut -d' ' -f2 | sed -n '1p')
-                fi
+                pid=$(ps aux 2>/dev/null | grep "[s]crcpy.*video-source=camera" | tr -s ' ' | cut -d' ' -f2 | head -n 1)
             fi
-            if [ ! -z "$pid" ]; then
-                kill "$pid" 2>/dev/null || true
-            fi
-        else
-            echo -e "${YELLOW}Warning:${NC} Cannot stop process (pkill/ps not available)"
-            return 1
+            [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
         fi
+    fi
+
+    if $was_running; then
         echo -e "${YELLOW}Stopped.${NC}"
         notify "low" "Android Camera" "⏹ Stopped"
     else
@@ -1448,10 +1509,10 @@ cmd_fix() {
     # Get USB device ID (in case there are multiple devices)
     local usb_device_id=""
     local device_count
-    device_count=$(adb devices 2>/dev/null | grep -v "List" | grep -c "device" || echo "0")
+    device_count=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
     if [ "$device_count" -gt 1 ]; then
         echo -e "${BLUE}Multiple devices detected. Selecting USB device...${NC}"
-        usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep "device" | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+        usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
         if [ ! -z "$usb_device_id" ]; then
             echo -e "${BLUE}Using device: $usb_device_id${NC}"
         fi
