@@ -173,6 +173,7 @@ uninstall() {
     log_info "Removing files..."
     sudo rm -f /usr/local/bin/android-webcam-ctl
     sudo rm -f /usr/local/bin/android-webcam-common
+    sudo rm -f /usr/local/bin/android-webcam-run-in-terminal
     rm -f "$HOME/.local/bin/android-webcam-ctl"   # cleanup legacy (old install location)
     rm -f "$HOME/.local/bin/android-cam-toggle.sh" # cleanup legacy
     rm -f "$HOME/.local/bin/android-cam-fix.sh"    # cleanup legacy
@@ -932,6 +933,66 @@ if ! sudo install -m 0644 "$TMP_COMMON" "$BIN_DIR/android-webcam-common"; then
     exit 1
 fi
 rm -f "$TMP_COMMON"
+
+log_info "Installing android-webcam-run-in-terminal to $BIN_DIR..."
+
+TMP_RUNTERM=$(mktemp) || { log_error "Failed to create temp file for run-in-terminal."; exit 1; }
+cat << 'RUNTERMEOF' > "$TMP_RUNTERM"
+#!/bin/bash
+# android-webcam-run-in-terminal - run android-webcam-ctl status/config/fix in a terminal (for desktop actions)
+
+set -e
+CTL="/usr/local/bin/android-webcam-ctl"
+case "${1:-}" in
+    status)  CMD="$CTL status; read -r -p \"Press Enter to close...\"; exec bash" ;;
+    config)  CMD="$CTL config" ;;
+    fix)     CMD="$CTL fix" ;;
+    *)       echo "Usage: $0 {status|config|fix}" >&2; exit 1 ;;
+esac
+
+run_in_term() {
+    local cmd="$1"
+    export AWRT_CMD="$cmd"
+    if command -v xdg-terminal-exec >/dev/null 2>&1; then
+        xdg-terminal-exec bash -c "$cmd"
+        return $?
+    fi
+    if command -v x-terminal-emulator >/dev/null 2>&1; then
+        x-terminal-emulator -e bash -c "$cmd"
+        return $?
+    fi
+    if command -v gnome-terminal >/dev/null 2>&1; then
+        gnome-terminal -- bash -c "$cmd"
+        return $?
+    fi
+    if command -v konsole >/dev/null 2>&1; then
+        konsole -e bash -c "$cmd"
+        return $?
+    fi
+    if command -v xfce4-terminal >/dev/null 2>&1; then
+        xfce4-terminal -e 'bash -c "$AWRT_CMD"'
+        return $?
+    fi
+    if command -v mate-terminal >/dev/null 2>&1; then
+        mate-terminal -e 'bash -c "$AWRT_CMD"'
+        return $?
+    fi
+    if command -v xterm >/dev/null 2>&1; then
+        xterm -e bash -c "$cmd"
+        return $?
+    fi
+    echo "No terminal emulator found. Install one of: gnome-terminal, konsole, xfce4-terminal, xterm." >&2
+    return 1
+}
+
+run_in_term "$CMD"
+RUNTERMEOF
+if ! sudo install -m 0755 "$TMP_RUNTERM" "$BIN_DIR/android-webcam-run-in-terminal"; then
+    log_error "Failed to install android-webcam-run-in-terminal to $BIN_DIR!"
+    rm -f "$TMP_RUNTERM"
+    exit 1
+fi
+rm -f "$TMP_RUNTERM"
 
 log_info "Installing android-webcam-ctl to $BIN_DIR..."
 
@@ -1819,6 +1880,7 @@ cmd_uninstall() {
     echo -e "${BLUE}[INFO]${NC} Removing files..."
     sudo rm -f /usr/local/bin/android-webcam-ctl
     sudo rm -f /usr/local/bin/android-webcam-common
+    sudo rm -f /usr/local/bin/android-webcam-run-in-terminal
     rm -f "$HOME/.local/bin/android-webcam-ctl"
     rm -f "$HOME/.local/bin/android-cam-toggle.sh"
     rm -f "$HOME/.local/bin/android-cam-fix.sh"
@@ -1932,21 +1994,21 @@ Actions=Status;Config;Fix;
 
 [Desktop Action Status]
 Name=Check Status
-Exec=sh -c '/usr/local/bin/android-webcam-ctl status; read -r -p "Press Enter...";'
+Exec=/usr/local/bin/android-webcam-run-in-terminal status
 Path=/usr/local/bin
-Terminal=true
+Terminal=false
 
 [Desktop Action Config]
 Name=Settings
-Exec=/usr/local/bin/android-webcam-ctl config
+Exec=/usr/local/bin/android-webcam-run-in-terminal config
 Path=/usr/local/bin
-Terminal=true
+Terminal=false
 
 [Desktop Action Fix]
 Name=Fix Connection (USB)
-Exec=/usr/local/bin/android-webcam-ctl fix
+Exec=/usr/local/bin/android-webcam-run-in-terminal fix
 Path=/usr/local/bin
-Terminal=true
+Terminal=false
 EOF
 
 # Separate Fix Icon (Optional but useful)
@@ -1955,9 +2017,9 @@ cat << EOF > "$APP_DIR/android-cam-fix.desktop"
 Version=1.0
 Name=Fix Camera (USB)
 Comment=Reconnect after restart
-Exec=/usr/local/bin/android-webcam-ctl fix
+Exec=/usr/local/bin/android-webcam-run-in-terminal fix
 Icon=smartphone
-Terminal=true
+Terminal=false
 Type=Application
 Categories=Utility;Settings;
 EOF
