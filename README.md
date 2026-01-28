@@ -62,8 +62,9 @@ Open a terminal (Ctrl+Alt+T) and paste one of the following commands:
 
 **Using wget:**
 ```bash
-wget -O - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | bash
+wget -qO - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | bash
 ```
+(The `-q` flag keeps wget quiet so its progress bar does not mix with the installer output.)
 
 **Or using curl (if wget is not available):**
 ```bash
