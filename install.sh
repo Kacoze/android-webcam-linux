@@ -691,6 +691,11 @@ echo " 1. USB Connection: YES (Connect cable now)"
 echo " 2. USB Debugging:  ENABLED (In Developer Options)"
 echo " 3. RSA Prompt:     ACCEPTED (On phone screen)"
 echo "---------------------------------------------------"
+prompt_read "Press Enter to connect phone now, or S to skip (pair later with 'android-webcam-ctl fix'): " skip_pairing
+if [[ "$skip_pairing" == "s" || "$skip_pairing" == "S" ]]; then
+    PHONE_IP=""
+    log_warn "Skipped device pairing. You can pair later with: android-webcam-ctl fix"
+else
 log_info "Waiting for device..."
 if ! adb wait-for-usb-device </dev/null; then
     log_error "Failed to detect device or operation cancelled."
@@ -837,6 +842,7 @@ else
     fi
 fi
 sleep 2
+fi
 
 # --- STEP 4: INSTALLING SCRIPTS ---
 echo -e "\n${GREEN}[4/5] Installing Control Scripts...${NC}"
