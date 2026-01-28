@@ -19,6 +19,30 @@ readonly RED='\033[0;31m'
 readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m' # No Color
 
+# --- TTY: safe prompts when run from pipe (e.g. wget -O - ... | bash) ---
+PROMPT_FD=0
+if [ ! -t 0 ]; then
+    if [ ! -e /dev/tty ] || [ ! -r /dev/tty ]; then
+        echo -e "${RED}[ERROR]${NC} Running from a pipe without a TTY. Interactive prompts are required."
+        echo "Please download the script and run it locally:"
+        echo "  wget https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh"
+        echo "  bash install.sh"
+        exit 1
+    fi
+    exec 3</dev/tty 2>/dev/null || {
+        echo -e "${RED}[ERROR]${NC} Cannot open /dev/tty. Interactive prompts are required."
+        echo "Please download the script and run it locally:"
+        echo "  wget https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh"
+        echo "  bash install.sh"
+        exit 1
+    }
+    PROMPT_FD=3
+    echo -e "${YELLOW}[WARN]${NC} Installation run from pipe; prompts will be read from terminal (/dev/tty)."
+fi
+
+prompt_read() { read -u "${PROMPT_FD}" -r -p "$1" "$2"; }
+prompt_pause() { read -u "${PROMPT_FD}" -r -p "$1"; }
+
 # --- HELPER FUNCTIONS ---
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -137,7 +161,7 @@ validate_ip() {
 uninstall() {
     echo -e "${RED}!!! WARNING !!!${NC}"
     echo "This will remove configuration files, icons, and control scripts."
-    read -r -p "Are you sure? (y/N): " confirm
+    prompt_read "Are you sure? (y/N): " confirm
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         echo "Aborted."
         exit 0
@@ -158,7 +182,7 @@ uninstall() {
     log_success "Files removed."
     
     echo "Do you want to remove system dependencies (scrcpy, v4l2loopback etc.)?"
-    read -r -p "Remove packages? (y/N): " pkg_confirm
+    prompt_read "Remove packages? (y/N): " pkg_confirm
     if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
         DISTRO=$(detect_distro)
         case "$DISTRO" in
@@ -228,7 +252,7 @@ install_deps() {
             log_info "Using DNF..."
             if ! dnf repolist | grep -q "rpmfusion"; then
                 log_warn "Fedora requires RPMFusion for v4l2loopback."
-                read -r -p "Press Enter to try installing anyway (might fail)..."
+                prompt_pause "Press Enter to try installing anyway (might fail)..."
             fi
             sudo dnf install -y android-tools v4l2loopback v4l2loopback-utils scrcpy ffmpeg libnotify || return 1
             return 0
@@ -241,7 +265,7 @@ install_deps() {
         *)
             log_error "Unsupported distribution: $DISTRO"
             echo "Manual install required: adb, v4l2loopback, scrcpy, ffmpeg, libnotify"
-            read -r -p "Press Enter if you have installed them manually..."
+            prompt_pause "Press Enter if you have installed them manually..."
             return 1
             ;;
     esac
@@ -251,7 +275,7 @@ if ! install_deps; then
     log_error "Dependency installation failed!"
     echo ""
     echo "Critical dependencies may be missing. The installation may fail."
-    read -r -p "Do you want to continue anyway? (y/N): " confirm
+    prompt_read "Do you want to continue anyway? (y/N): " confirm
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         log_error "Installation aborted by user."
         exit 1
@@ -552,7 +576,7 @@ ensure_scrcpy() {
     echo "  - Flatpak: flatpak install flathub org.scrcpy.ScrCpy"
     echo "  - Or download from: https://github.com/Genymobile/scrcpy/releases"
     echo ""
-    read -r -p "Do you want to continue installation anyway? (y/N): " confirm
+    prompt_read "Do you want to continue installation anyway? (y/N): " confirm
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         log_error "Installation aborted. Please install scrcpy manually and run installer again."
         return 1
@@ -564,7 +588,7 @@ ensure_scrcpy() {
 if ! ensure_scrcpy; then
     log_error "scrcpy installation failed!"
     echo ""
-    read -r -p "Do you want to continue installation anyway? (y/N): " confirm
+    prompt_read "Do you want to continue installation anyway? (y/N): " confirm
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         log_error "Installation aborted. Please install scrcpy manually and run installer again."
         exit 1
@@ -763,7 +787,7 @@ if [ -z "$PHONE_IP" ]; then
     echo ""
     log_info "Please enter the phone's Wi-Fi IP address manually."
     while true; do
-        read -r -p "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
+        prompt_read "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
         # Validate IP format
         if validate_ip "$PHONE_IP"; then
             break

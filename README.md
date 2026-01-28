@@ -70,6 +70,8 @@ wget -O - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/ins
 curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | bash
 ```
 
+The installer is interactive. When run via pipe (`wget … | bash`), it reads prompts from your terminal (`/dev/tty`). If prompts do not appear or installation fails, download the script and run it locally: `wget …/install.sh` then `bash install.sh`.
+
 > **Note:** The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices.
 
 The control script `android-webcam-ctl` is installed to `/usr/local/bin`, so it is available in the terminal and from the application menu without adding any directory to your PATH.
