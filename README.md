@@ -24,7 +24,7 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
 1.  **System:** Linux (tested on Ubuntu 22.04 / 24.04, Debian, Mint, Pop!_OS, KDE Neon, Arch Linux, Manjaro, Fedora, openSUSE, and others).
 2.  **Phone:** Android 12 or newer (required for camera mirroring via `scrcpy --video-source=camera`).
 3.  **Network:** After initial USB pairing, computer and phone must be on the same Wi-Fi network for wireless operation. USB connection is only required for the initial setup and re-pairing after phone restart.
-4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this automatically). On Ubuntu/Debian, the package manager provides scrcpy &lt; 2.0, so the installer will use Snap, Flatpak, or a direct download from GitHub instead.
+4.  **Software:** `scrcpy` version 2.0 or newer (installer attempts to handle this automatically). On Ubuntu/Debian, the package manager provides scrcpy &lt; 2.0, so the installer will use Snap, Flatpak, or a direct download from GitHub instead. The installer also installs **Xvfb** so that headless mode (no camera window) works without a visible placeholder.
 5.  **Privileges:** ⚠️ **Administrator access (sudo) is required** for installing system packages and kernel modules. The installer will prompt for your password.
 6.  **Permissions:** Your user should be in the `video` group to access `/dev/video*` devices. This is usually automatic on most distributions, but you can verify with `groups | grep video`. If not present, add yourself with `sudo usermod -aG video $USER` and log out/in.
 7.  **Internet:** ⚠️ **Active internet connection is required ONLY during installation** for:
@@ -73,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/in
 
 The installer is interactive. When run via pipe (`wget … | bash`), it reads prompts from your terminal (`/dev/tty`). If prompts do not appear or installation fails, download the script and run it locally: `wget …/install.sh` then `bash install.sh`.
 
-> **Note:** The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices. You can press **S** to skip this step and pair later with `android-webcam-ctl fix`.
+> **Note:** The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices. You can press **S** to skip this step and pair later with `android-webcam-ctl fix`. If the device is not detected or TCP/IP cannot be enabled, the installer continues without pairing; pair later with `android-webcam-ctl fix`.
 
 The control script `android-webcam-ctl` is installed to `/usr/local/bin`, so it is available in the terminal and from the application menu without adding any directory to your PATH.
 
@@ -96,7 +96,7 @@ When you want to join a call:
 *   The phone screen typically turns off automatically (to save battery).
 *   Open Zoom/Teams/Discord and select the camera: **Android Cam** (appears as `/dev/video10`).
 
-**To turn off:** Simply click the **📷 Camera Phone** icon again or use the notification action.
+**To turn off:** Click the **📷 Camera Phone** icon again, or right-click the icon → **Stop Camera**, or use the notification action.
 
 ### 2. Application Examples
 
@@ -121,9 +121,12 @@ The camera should appear automatically as "Android Cam" in browser permission di
 ### 3. Advanced Controls (Right-Click)
 
 Right-click the **Camera Phone** icon to access:
-- **Settings**: Opening the configuration file allows you to change back/front camera, resolution, etc.
+- **Stop Camera**: Turn off the camera (useful in headless mode, when there is no window to close).
 - **Check Status**: See if the camera is running and check current settings. A terminal window opens; press Enter to close it.
+- **Settings**: Opening the configuration file allows you to change back/front camera, resolution, etc.
 - **Fix Connection**: Quick access to USB re-pairing tool.
+
+When the camera runs without a window (headless), the dock usually does not show that it is active. Use **Check Status** to confirm it is running, or **Stop Camera** when you are done.
 
 ### 4. Emergency Situation (After Phone Restart)
 
@@ -152,6 +155,7 @@ CAMERA_FACING="back"      # Options: front, back, external
 VIDEO_SIZE=""             # Max dimension in pixels (e.g., "1080" for 1080p), leave empty for max resolution
 BIT_RATE="8M"             # Higher = better quality, more latency
 EXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments
+SHOW_WINDOW="true"        # false = no camera window (headless); image only to /dev/video10
 ```
 
 ### Example Configurations
@@ -191,6 +195,22 @@ VIDEO_SIZE=""              # Empty = maximum supported resolution
 BIT_RATE="16M"             # High bitrate for best quality
 EXTRA_ARGS="--no-audio --v4l2-buffer=400"
 ```
+
+**Run without camera window (headless):**
+```bash
+PHONE_IP="192.168.1.50"
+CAMERA_FACING="back"
+VIDEO_SIZE=""
+BIT_RATE="8M"
+EXTRA_ARGS="--no-audio --v4l2-buffer=400"
+SHOW_WINDOW="false"        # No window; stream only to /dev/video10 (Zoom/Teams etc. still see the camera)
+```
+
+#### Run without window (headless)
+
+When `SHOW_WINDOW="false"`, the camera runs in the background with no preview window. The stream is still sent to `/dev/video10`, so apps like Zoom or OBS see "Android Cam" as usual. The dock will not show that the camera is active (no window). To stop the camera or check if it is running: right-click the **Camera Phone** icon → **Stop Camera** to turn it off, or **Check Status** to see the current state. A notification is shown when the camera starts in headless mode as a reminder.
+
+scrcpy still creates a small placeholder window (with its logo) when using `--no-video-playback`. The **installer installs Xvfb** so this placeholder is drawn on a virtual display and is not visible. If you installed the tools manually or the placeholder window still appears, install Xvfb: `sudo apt install xvfb` (Debian/Ubuntu) or equivalent.
 
 **Note:** After changing configuration, restart the camera (stop and start) for changes to take effect.
 

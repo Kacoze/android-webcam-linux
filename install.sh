@@ -199,15 +199,15 @@ uninstall() {
         fi
     fi
     
-    echo "Do you want to remove system dependencies (scrcpy, v4l2loopback etc.)?"
+    echo "Do you want to remove system dependencies (scrcpy, v4l2loopback, xvfb etc.)?"
     prompt_read "Remove packages? (y/N): " pkg_confirm
     if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
         DISTRO=$(detect_distro)
         case "$DISTRO" in
-            ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils ;;
-            arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms ;;
-            fedora) sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils ;;
-            opensuse*|suse) sudo zypper remove -y scrcpy v4l2loopback-kmp-default v4l2loopback-utils ;;
+            ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils xvfb ;;
+            arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms xorg-server-xvfb ;;
+            fedora) sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils xorg-x11-server-Xvfb ;;
+            opensuse*|suse) sudo zypper remove -y scrcpy v4l2loopback-kmp-default v4l2loopback-utils xorg-x11-server-extra ;;
             *) echo "Please remove packages manually for your distro." ;;
         esac
     fi
@@ -257,13 +257,13 @@ install_deps() {
         ubuntu|debian|pop|linuxmint|kali|neon|zorin)
             log_info "Using APT..."
             sudo apt update || return 1
-            DEPS=("android-tools-adb" "v4l2loopback-dkms" "v4l2loopback-utils" "ffmpeg" "libnotify-bin")
+            DEPS=("android-tools-adb" "v4l2loopback-dkms" "v4l2loopback-utils" "ffmpeg" "libnotify-bin" "xvfb")
             sudo apt install -y "${DEPS[@]}" || return 1
             return 0
             ;;
         arch|manjaro|endeavouros|garuda)
             log_info "Using PACMAN..."
-            sudo pacman -Sy --needed android-tools v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg libnotify || return 1
+            sudo pacman -Sy --needed android-tools v4l2loopback-dkms v4l2loopback-utils scrcpy ffmpeg libnotify xorg-server-xvfb || return 1
             return 0
             ;;
         fedora|rhel|centos|nobara)
@@ -272,17 +272,17 @@ install_deps() {
                 log_warn "Fedora requires RPMFusion for v4l2loopback."
                 prompt_pause "Press Enter to try installing anyway (might fail)..."
             fi
-            sudo dnf install -y android-tools v4l2loopback v4l2loopback-utils scrcpy ffmpeg libnotify || return 1
+            sudo dnf install -y android-tools v4l2loopback v4l2loopback-utils scrcpy ffmpeg libnotify xorg-x11-server-Xvfb || return 1
             return 0
             ;;
         opensuse*|suse)
             log_info "Using ZYPPER..."
-            sudo zypper install -y android-tools v4l2loopback-kmp-default v4l2loopback-utils scrcpy ffmpeg libnotify || return 1
+            sudo zypper install -y android-tools v4l2loopback-kmp-default v4l2loopback-utils scrcpy ffmpeg libnotify xorg-x11-server-extra || return 1
             return 0
             ;;
         *)
             log_error "Unsupported distribution: $DISTRO"
-            echo "Manual install required: adb, v4l2loopback, scrcpy, ffmpeg, libnotify"
+            echo "Manual install required: adb, v4l2loopback, scrcpy, ffmpeg, libnotify, xvfb (for headless mode)"
             prompt_pause "Press Enter if you have installed them manually..."
             return 1
             ;;
@@ -703,16 +703,9 @@ STEP3_SKIP=0
 log_info "Waiting for device..."
 if ! adb wait-for-usb-device </dev/null; then
     log_error "Failed to detect device or operation cancelled."
-    echo -e "${YELLOW}Skip pairing and continue? You can pair later with 'android-webcam-ctl fix'. (y/N)${NC}"
-    prompt_read "Your choice: " skip_after_fail
-    if [[ "$skip_after_fail" == "y" || "$skip_after_fail" == "Y" ]]; then
-        PHONE_IP=""
-        STEP3_SKIP=1
-        log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
-    else
-        echo "Run 'bash install.sh' again; choose 'y' to skip pairing and still install (then run 'android-webcam-ctl fix' to pair)."
-        exit 1
-    fi
+    PHONE_IP=""
+    STEP3_SKIP=1
+    log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
 fi
 
 if [ "$STEP3_SKIP" -eq 0 ]; then
@@ -857,29 +850,15 @@ if [ ! -z "$USB_DEVICE_ID" ]; then
     log_info "Enabling TCP/IP mode on device $USB_DEVICE_ID..."
     if ! adb -s "$USB_DEVICE_ID" tcpip 5555 </dev/null; then
         log_error "Failed to enable TCP/IP mode on device."
-        echo -e "${YELLOW}Skip pairing and continue? You can pair later with 'android-webcam-ctl fix'. (y/N)${NC}"
-        prompt_read "Your choice: " skip_after_fail
-        if [[ "$skip_after_fail" == "y" || "$skip_after_fail" == "Y" ]]; then
-            PHONE_IP=""
-            log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
-        else
-            echo "Run 'bash install.sh' again; choose 'y' to skip pairing and still install (then run 'android-webcam-ctl fix' to pair)."
-            exit 1
-        fi
+        PHONE_IP=""
+        log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
     fi
 else
     log_info "Enabling TCP/IP mode..."
     if ! adb tcpip 5555 </dev/null; then
         log_error "Failed to enable TCP/IP mode on device."
-        echo -e "${YELLOW}Skip pairing and continue? You can pair later with 'android-webcam-ctl fix'. (y/N)${NC}"
-        prompt_read "Your choice: " skip_after_fail
-        if [[ "$skip_after_fail" == "y" || "$skip_after_fail" == "Y" ]]; then
-            PHONE_IP=""
-            log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
-        else
-            echo "Run 'bash install.sh' again; choose 'y' to skip pairing and still install (then run 'android-webcam-ctl fix' to pair)."
-            exit 1
-        fi
+        PHONE_IP=""
+        log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
     fi
 fi
 sleep 2
@@ -1097,6 +1076,7 @@ CAMERA_FACING="$DEFAULT_CAMERA_FACING"
 VIDEO_SIZE="$DEFAULT_VIDEO_SIZE"
 BIT_RATE="$DEFAULT_BIT_RATE"
 EXTRA_ARGS="$DEFAULT_ARGS"
+SHOW_WINDOW="true"
 END_CONF
     fi
     
@@ -1109,6 +1089,7 @@ CAMERA_FACING="$DEFAULT_CAMERA_FACING"
 VIDEO_SIZE="$DEFAULT_VIDEO_SIZE"
 BIT_RATE="$DEFAULT_BIT_RATE"
 EXTRA_ARGS="$DEFAULT_ARGS"
+SHOW_WINDOW="true"
 END_CONF
     fi
 
@@ -1117,6 +1098,8 @@ END_CONF
         echo "Please check the file for syntax errors."
         return 1
     fi
+    # Default for existing configs without SHOW_WINDOW
+    SHOW_WINDOW="${SHOW_WINDOW:-true}"
 }
 
 # --- Helpers ---
@@ -1462,6 +1445,15 @@ Or reboot your system." 2>/dev/null || true
     
     CMD+=("--v4l2-sink=/dev/video10")
     
+    # Optional: run without camera window (headless; image only to v4l2)
+    local show_window_lower
+    show_window_lower=$(echo "${SHOW_WINDOW:-true}" | tr '[:upper:]' '[:lower:]')
+    if [[ "$show_window_lower" == "false" || "$show_window_lower" == "0" || "$show_window_lower" == "no" ]]; then
+        if [[ -z "$EXTRA_ARGS" || "$EXTRA_ARGS" != *"--no-video-playback"* ]]; then
+            CMD+=("--no-video-playback")
+        fi
+    fi
+    
     # Parse EXTRA_ARGS safely to prevent command injection
     # Security: Validate and parse without using eval
     if [ ! -z "$EXTRA_ARGS" ]; then
@@ -1504,18 +1496,24 @@ Or reboot your system." 2>/dev/null || true
 
     echo "Executing: ${CMD[*]}"
     
+    # When headless (SHOW_WINDOW=false), scrcpy still creates a placeholder window with logo; run inside Xvfb so it's not visible
+    local RUNNER_ARRAY=(env "SDL_VIDEO_WAYLAND_APP_ID=android-cam")
+    if [[ "$show_window_lower" == "false" || "$show_window_lower" == "0" || "$show_window_lower" == "no" ]]; then
+        if command -v xvfb-run >/dev/null 2>&1; then
+            RUNNER_ARRAY=(xvfb-run -a -s "-screen 0 1x1x24" -- env "SDL_VIDEO_WAYLAND_APP_ID=android-cam")
+        fi
+    fi
+    
     # Run in background (SDL_VIDEO_WAYLAND_APP_ID so Wayland taskbar groups window with Camera Phone icon)
     local PID=""
     if command -v nohup >/dev/null 2>&1; then
-        SDL_VIDEO_WAYLAND_APP_ID=android-cam nohup "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        "${RUNNER_ARRAY[@]}" nohup "${CMD[@]}" > "$LOG_FILE" 2>&1 &
         PID=$!
     elif command -v setsid >/dev/null 2>&1; then
-        # Fallback: use setsid if available
-        SDL_VIDEO_WAYLAND_APP_ID=android-cam setsid "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        "${RUNNER_ARRAY[@]}" setsid "${CMD[@]}" > "$LOG_FILE" 2>&1 &
         PID=$!
     else
-        # Last resort: run in background without nohup
-        SDL_VIDEO_WAYLAND_APP_ID=android-cam "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        "${RUNNER_ARRAY[@]}" "${CMD[@]}" > "$LOG_FILE" 2>&1 &
         PID=$!
         disown 2>/dev/null || true
     fi
@@ -1532,6 +1530,9 @@ Or reboot your system." 2>/dev/null || true
         if ps -p "$PID" > /dev/null 2>&1; then
             echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
             notify "normal" "Android Camera" "✅ Active (PID: $PID)"
+            if [[ "$show_window_lower" == "false" || "$show_window_lower" == "0" || "$show_window_lower" == "no" ]]; then
+                notify "normal" "Android Camera" "Kamera działa w tle (bez okna). Zatrzymaj: prawy przycisk na ikonę → Stop." "camera-web"
+            fi
         else
             rm -f "$PID_FILE" 2>/dev/null
             echo -e "${RED}Failed to start.${NC} Check $LOG_FILE"
@@ -1549,6 +1550,9 @@ Or reboot your system." 2>/dev/null || true
         # ps not available, assume it started
         echo -e "${GREEN}Started (PID: $PID)${NC}"
         notify "normal" "Android Camera" "✅ Active (PID: $PID)"
+        if [[ "$show_window_lower" == "false" || "$show_window_lower" == "0" || "$show_window_lower" == "no" ]]; then
+            notify "normal" "Android Camera" "Kamera działa w tle (bez okna). Zatrzymaj: prawy przycisk na ikonę → Stop." "camera-web"
+        fi
     fi
 }
 
@@ -1761,7 +1765,7 @@ cmd_fix() {
             fi
         else
             mkdir -p "$CONFIG_DIR"
-            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\n' "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
+            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\nSHOW_WINDOW="true"\n' "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
                 echo -e "${GREEN}Saved IP to config: $detected_ip${NC}"
         fi
     fi
@@ -1905,15 +1909,15 @@ cmd_uninstall() {
         fi
     fi
 
-    read -r -p "Remove system dependencies (scrcpy, v4l2loopback etc.)? (y/N): " pkg_confirm
+    read -r -p "Remove system dependencies (scrcpy, v4l2loopback, xvfb etc.)? (y/N): " pkg_confirm
     if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
         local distro="unknown"
         [ -f /etc/os-release ] && . /etc/os-release && distro="${ID:-unknown}"
         case "$distro" in
-            ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils ;;
-            arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms ;;
-            fedora) sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils ;;
-            opensuse*|suse) sudo zypper remove -y scrcpy v4l2loopback-kmp-default v4l2loopback-utils ;;
+            ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils xvfb ;;
+            arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms xorg-server-xvfb ;;
+            fedora) sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils xorg-x11-server-Xvfb ;;
+            opensuse*|suse) sudo zypper remove -y scrcpy v4l2loopback-kmp-default v4l2loopback-utils xorg-x11-server-extra ;;
             *) echo "Please remove packages manually for your distro." ;;
         esac
     fi
@@ -1959,7 +1963,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
         PHONE_IP=""
     fi
     # Use printf for safe file creation instead of heredoc with interpolation
-    printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments\n' "$PHONE_IP" > "$CONFIG_FILE"
+    printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments\nSHOW_WINDOW="true"\n' "$PHONE_IP" > "$CONFIG_FILE"
 else
     log_info "Updating IP in existing config..."
     # File exists (we're in the else block), so update it
@@ -1990,7 +1994,7 @@ Terminal=false
 Type=Application
 Categories=Utility;Video;
 StartupWMClass=scrcpy
-Actions=Status;Config;Fix;
+Actions=Status;Config;Fix;Stop;
 
 [Desktop Action Status]
 Name=Check Status
@@ -2007,6 +2011,12 @@ Terminal=false
 [Desktop Action Fix]
 Name=Fix Connection (USB)
 Exec=/usr/local/bin/android-webcam-run-in-terminal fix
+Path=/usr/local/bin
+Terminal=false
+
+[Desktop Action Stop]
+Name=Stop Camera
+Exec=/usr/local/bin/android-webcam-ctl stop
 Path=/usr/local/bin
 Terminal=false
 EOF
