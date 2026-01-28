@@ -698,18 +698,31 @@ if [[ "$skip_pairing" == "s" || "$skip_pairing" == "S" ]]; then
     PHONE_IP=""
     log_warn "Skipped device pairing. You can pair later with: android-webcam-ctl fix"
 else
+STEP3_SKIP=0
 log_info "Waiting for device..."
 if ! adb wait-for-usb-device </dev/null; then
     log_error "Failed to detect device or operation cancelled."
-    exit 1
+    echo -e "${YELLOW}Skip pairing and continue? You can pair later with 'android-webcam-ctl fix'. (y/N)${NC}"
+    prompt_read "Your choice: " skip_after_fail
+    if [[ "$skip_after_fail" == "y" || "$skip_after_fail" == "Y" ]]; then
+        PHONE_IP=""
+        STEP3_SKIP=1
+        log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
+    else
+        echo "Run 'bash install.sh' again; choose 'y' to skip pairing and still install (then run 'android-webcam-ctl fix' to pair)."
+        exit 1
+    fi
 fi
 
+if [ "$STEP3_SKIP" -eq 0 ]; then
 log_success "Device connected!"
 
 # Get USB device ID (in case there are multiple devices)
 USB_DEVICE_ID=""
 # Count only lines with second column "device" (exclude offline/unauthorized)
 DEVICE_COUNT=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
+DEVICE_COUNT=$(echo "$DEVICE_COUNT" | tr -d '\n\r' | head -n 1)
+[ -z "$DEVICE_COUNT" ] || ! [[ "$DEVICE_COUNT" =~ ^[0-9]+$ ]] && DEVICE_COUNT="0"
 if [ "$DEVICE_COUNT" -gt 1 ]; then
     log_info "Multiple devices detected. Selecting USB device..."
     # Get the first connected device (second column must be "device")
@@ -817,16 +830,25 @@ if [ -z "$PHONE_IP" ]; then
     echo "  - Phone and computer are on different networks"
     echo "  - ADB cannot access network interface information"
     echo ""
-    log_info "Please enter the phone's Wi-Fi IP address manually."
+    log_info "Enter the phone's Wi-Fi IP address, or S to skip (pair later with 'android-webcam-ctl fix')."
     while true; do
-        prompt_read "Enter phone IP manually (e.g., 192.168.1.50): " PHONE_IP
-        # Validate IP format
+        prompt_read "Phone IP (e.g. 192.168.1.50) or S to skip: " PHONE_IP
+        PHONE_IP=$(echo "$PHONE_IP" | tr -d '[:space:]')
+        if [[ "$PHONE_IP" == "s" || "$PHONE_IP" == "S" ]]; then
+            PHONE_IP=""
+            log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
+            break
+        fi
+        if [ -z "$PHONE_IP" ]; then
+            log_error "Invalid IP address format. Please try again or enter S to skip."
+            continue
+        fi
         if validate_ip "$PHONE_IP"; then
+            log_success "Using manually entered IP: $PHONE_IP"
             break
         fi
         log_error "Invalid IP address format. Please try again."
     done
-    log_success "Using manually entered IP: $PHONE_IP"
 fi
 
 # Enable TCP/IP
@@ -834,16 +856,33 @@ if [ ! -z "$USB_DEVICE_ID" ]; then
     log_info "Enabling TCP/IP mode on device $USB_DEVICE_ID..."
     if ! adb -s "$USB_DEVICE_ID" tcpip 5555 </dev/null; then
         log_error "Failed to enable TCP/IP mode on device."
-        exit 1
+        echo -e "${YELLOW}Skip pairing and continue? You can pair later with 'android-webcam-ctl fix'. (y/N)${NC}"
+        prompt_read "Your choice: " skip_after_fail
+        if [[ "$skip_after_fail" == "y" || "$skip_after_fail" == "Y" ]]; then
+            PHONE_IP=""
+            log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
+        else
+            echo "Run 'bash install.sh' again; choose 'y' to skip pairing and still install (then run 'android-webcam-ctl fix' to pair)."
+            exit 1
+        fi
     fi
 else
     log_info "Enabling TCP/IP mode..."
     if ! adb tcpip 5555 </dev/null; then
         log_error "Failed to enable TCP/IP mode on device."
-        exit 1
+        echo -e "${YELLOW}Skip pairing and continue? You can pair later with 'android-webcam-ctl fix'. (y/N)${NC}"
+        prompt_read "Your choice: " skip_after_fail
+        if [[ "$skip_after_fail" == "y" || "$skip_after_fail" == "Y" ]]; then
+            PHONE_IP=""
+            log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
+        else
+            echo "Run 'bash install.sh' again; choose 'y' to skip pairing and still install (then run 'android-webcam-ctl fix' to pair)."
+            exit 1
+        fi
     fi
 fi
 sleep 2
+fi
 fi
 
 # --- STEP 4: INSTALLING SCRIPTS ---
@@ -1503,6 +1542,7 @@ cmd_fix() {
         return 1
     fi
     
+    adb disconnect 2>/dev/null || true
     notify "normal" "Camera Setup" "🔌 Connect USB Cable..." "smartphone"
     echo -e "${BLUE}Waiting for USB device...${NC}"
     echo "Press Ctrl+C to cancel"
@@ -1514,20 +1554,126 @@ cmd_fix() {
         return 1
     fi
     
-    # Get USB device ID (in case there are multiple devices)
+    # Get USB device ID (in case there are multiple devices - any state: device, unauthorized, offline)
     local usb_device_id=""
-    local device_count
-    device_count=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
-    if [ "$device_count" -gt 1 ]; then
-        echo -e "${BLUE}Multiple devices detected. Selecting USB device...${NC}"
+    local total_count
+    total_count=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\t' | wc -l 2>/dev/null || echo "0")
+    total_count=$(echo "$total_count" | tr -d '\n\r' | head -n 1)
+    [ -z "$total_count" ] || ! [[ "$total_count" =~ ^[0-9]+$ ]] && total_count="0"
+    if [ "$total_count" -gt 1 ]; then
+        local device_list
+        device_list=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$')
+        local devices=()
+        local line serial
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            serial=$(echo "$line" | awk '{print $1}' | tr -d '[:space:]')
+            [ -n "$serial" ] && devices+=( "$serial" )
+        done <<< "$device_list"
+        local num_devices=${#devices[@]}
+        if [ "$num_devices" -eq 0 ]; then
+            :
+        elif [ "$num_devices" -eq 1 ]; then
+            usb_device_id="${devices[0]}"
+            echo -e "${BLUE}Using device: $usb_device_id${NC}"
+        else
+            echo -e "${BLUE}Multiple devices in \"device\" state. Select one:${NC}"
+            local i
+            for i in "${!devices[@]}"; do
+                echo "  $((i+1))) ${devices[i]}"
+            done
+            local choice
+            while true; do
+                read -r -p "Your choice (number or serial, Enter = 1): " choice
+                choice=$(echo "$choice" | tr -d '[:space:]')
+                if [ -z "$choice" ]; then
+                    usb_device_id="${devices[0]}"
+                    break
+                fi
+                if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$num_devices" ] 2>/dev/null; then
+                    usb_device_id="${devices[choice-1]}"
+                    break
+                fi
+                for i in "${!devices[@]}"; do
+                    if [ "$choice" = "${devices[i]}" ]; then
+                        usb_device_id="${devices[i]}"
+                        break 2
+                    fi
+                done
+                echo -e "${RED}Invalid choice. Enter a number 1-$num_devices or the device serial.${NC}"
+            done
+            if [ -n "$usb_device_id" ]; then
+                echo -e "${BLUE}Using device: $usb_device_id${NC}"
+            fi
+        fi
+    fi
+    
+    # Fallback: if still empty but multiple devices total, use first device in "device" state
+    if [ -z "$usb_device_id" ] && [ "$total_count" -gt 1 ] 2>/dev/null; then
         usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
-        if [ ! -z "$usb_device_id" ]; then
+    fi
+    
+    # Final check: right before tcpip, re-read device list (may have changed since wait-for-usb)
+    if [ -z "$usb_device_id" ]; then
+        local device_count_now
+        device_count_now=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
+        device_count_now=$(echo "$device_count_now" | tr -d '\n\r' | head -n 1)
+        [[ "$device_count_now" =~ ^[0-9]+$ ]] && [ "$device_count_now" -gt 1 ] 2>/dev/null && \
+            usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+    fi
+    
+    # Unconditional safety: never run "adb tcpip" without -s when multiple devices are present
+    local device_count_final
+    device_count_final=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
+    device_count_final=$(echo "$device_count_final" | tr -d '\n\r' | head -n 1)
+    if [[ "$device_count_final" =~ ^[0-9]+$ ]] && [ "$device_count_final" -ge 2 ] 2>/dev/null; then
+        if [ -z "$usb_device_id" ]; then
+            usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+        fi
+        if [ -n "$usb_device_id" ]; then
             echo -e "${BLUE}Using device: $usb_device_id${NC}"
         fi
     fi
     
+    local detected_ip=""
+    if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
+        for iface in wlan0 swlan0 wlan1 wlan2 wifi0; do
+            local ip_val=""
+            if [ -n "$usb_device_id" ]; then
+                ip_val=$(adb -s "$usb_device_id" shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
+            else
+                ip_val=$(adb shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
+            fi
+            if [ -n "$ip_val" ] && validate_ip "$ip_val"; then
+                detected_ip="$ip_val"
+                break
+            fi
+        done
+        if [ -z "$detected_ip" ]; then
+            local all_ips=""
+            if [ -n "$usb_device_id" ]; then
+                all_ips=$(adb -s "$usb_device_id" shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
+            else
+                all_ips=$(adb shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
+            fi
+            while IFS= read -r line || [ -n "$line" ]; do
+                [ -z "$line" ] && continue
+                local iface_name ip_part
+                iface_name=$(echo "$line" | cut -d: -f1 | tr -d '[:space:]')
+                ip_part=$(echo "$line" | cut -d: -f2 | tr -d '[:space:]')
+                [[ "$iface_name" == "lo" ]] || [[ "$iface_name" == "lo:"* ]] && continue
+                if [ -n "$ip_part" ] && validate_ip "$ip_part"; then
+                    if [[ "$ip_part" =~ ^10\. ]] || [[ "$ip_part" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] || [[ "$ip_part" =~ ^192\.168\. ]]; then
+                        detected_ip="$ip_part"
+                        break
+                    fi
+                fi
+            done <<< "$all_ips"
+        fi
+    fi
+    
     echo "Device connected. Enabling TCP/IP mode..."
-    if [ ! -z "$usb_device_id" ]; then
+    if [ -n "$usb_device_id" ]; then
         if adb -s "$usb_device_id" tcpip 5555; then
             echo -e "${GREEN}Done! You can disconnect USB now.${NC}"
             notify "normal" "Camera Setup" "✅ Fixed! Unplug USB." "smartphone"
@@ -1544,6 +1690,18 @@ cmd_fix() {
             echo -e "${RED}Error:${NC} Failed to enable TCP/IP mode"
             notify "critical" "Camera Setup" "Failed to enable TCP/IP" "error"
             return 1
+        fi
+    fi
+    
+    if [ -n "$detected_ip" ]; then
+        if load_config 2>/dev/null; then
+            if sed -i "s|PHONE_IP=.*|PHONE_IP=\"$detected_ip\"|" "$CONFIG_FILE" 2>/dev/null; then
+                echo -e "${GREEN}Saved IP to config: $detected_ip${NC}"
+            fi
+        else
+            mkdir -p "$CONFIG_DIR"
+            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\n' "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
+                echo -e "${GREEN}Saved IP to config: $detected_ip${NC}"
         fi
     fi
 }
@@ -1624,7 +1782,6 @@ cmd_config() {
         return 1
     fi
     
-    # Find available editor
     local editor=""
     if [ ! -z "$EDITOR" ] && command -v "$EDITOR" >/dev/null 2>&1; then
         editor="$EDITOR"
@@ -1638,7 +1795,6 @@ cmd_config() {
         echo -e "${RED}Error:${NC} No editor found. Please install nano, vi, or set EDITOR environment variable."
         return 1
     fi
-    
     "$editor" "$CONFIG_FILE"
 }
 
