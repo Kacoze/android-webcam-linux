@@ -1443,18 +1443,18 @@ Or reboot your system." 2>/dev/null || true
 
     echo "Executing: ${CMD[*]}"
     
-    # Run in background
+    # Run in background (SDL_VIDEO_WAYLAND_APP_ID so Wayland taskbar groups window with Camera Phone icon)
     local PID=""
     if command -v nohup >/dev/null 2>&1; then
-        nohup "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        SDL_VIDEO_WAYLAND_APP_ID=android-cam nohup "${CMD[@]}" > "$LOG_FILE" 2>&1 &
         PID=$!
     elif command -v setsid >/dev/null 2>&1; then
         # Fallback: use setsid if available
-        setsid "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        SDL_VIDEO_WAYLAND_APP_ID=android-cam setsid "${CMD[@]}" > "$LOG_FILE" 2>&1 &
         PID=$!
     else
         # Last resort: run in background without nohup
-        "${CMD[@]}" > "$LOG_FILE" 2>&1 &
+        SDL_VIDEO_WAYLAND_APP_ID=android-cam "${CMD[@]}" > "$LOG_FILE" 2>&1 &
         PID=$!
         disown 2>/dev/null || true
     fi
@@ -1927,6 +1927,7 @@ Icon=camera-web
 Terminal=false
 Type=Application
 Categories=Utility;Video;
+StartupWMClass=scrcpy
 Actions=Status;Config;Fix;
 
 [Desktop Action Status]
