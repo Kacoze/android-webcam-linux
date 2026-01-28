@@ -691,7 +691,9 @@ echo " 1. USB Connection: YES (Connect cable now)"
 echo " 2. USB Debugging:  ENABLED (In Developer Options)"
 echo " 3. RSA Prompt:     ACCEPTED (On phone screen)"
 echo "---------------------------------------------------"
-prompt_read "Press Enter to connect phone now, or S to skip (pair later with 'android-webcam-ctl fix'): " skip_pairing
+echo ""
+echo -e "${YELLOW}Press Enter to connect phone now, or S to skip (pair later with 'android-webcam-ctl fix').${NC}"
+prompt_read "Your choice: " skip_pairing
 if [[ "$skip_pairing" == "s" || "$skip_pairing" == "S" ]]; then
     PHONE_IP=""
     log_warn "Skipped device pairing. You can pair later with: android-webcam-ctl fix"
