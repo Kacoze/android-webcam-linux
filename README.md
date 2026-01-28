@@ -396,6 +396,11 @@ See FAQ section "What to do when Secure Boot blocks the v4l2loopback module?" fo
 
 If you want to remove the tool:
 
+**If the tool is already installed (easiest):**
+```bash
+android-webcam-ctl uninstall
+```
+
 **If you have the installer locally:**
 ```bash
 ./install.sh --uninstall

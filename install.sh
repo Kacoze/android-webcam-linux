@@ -1634,6 +1634,68 @@ cmd_config() {
     "$editor" "$CONFIG_FILE"
 }
 
+cmd_uninstall() {
+    echo -e "${RED}!!! WARNING !!!${NC}"
+    echo "This will remove configuration files, icons, and control scripts."
+    read -r -p "Are you sure? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Aborted."
+        return 0
+    fi
+
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo -e "${RED}Error:${NC} sudo is required to uninstall."
+        return 1
+    fi
+    if ! sudo -v 2>/dev/null; then
+        echo -e "${RED}Error:${NC} Could not obtain sudo privileges."
+        return 1
+    fi
+
+    echo -e "${BLUE}[INFO]${NC} Removing files..."
+    sudo rm -f /usr/local/bin/android-webcam-ctl
+    sudo rm -f /usr/local/bin/android-webcam-common
+    rm -f "$HOME/.local/bin/android-webcam-ctl"
+    rm -f "$HOME/.local/bin/android-cam-toggle.sh"
+    rm -f "$HOME/.local/bin/android-cam-fix.sh"
+    rm -rf "$HOME/.config/android-webcam"
+    rm -f "$HOME/.local/share/applications/android-cam.desktop"
+    rm -f "$HOME/.local/share/applications/android-cam-fix.desktop"
+
+    echo -e "${GREEN}[OK]${NC} Files removed."
+
+    if command -v snap >/dev/null 2>&1 && snap list 2>/dev/null | grep -q "^scrcpy "; then
+        echo "scrcpy is installed via Snap."
+        read -r -p "Remove scrcpy (Snap)? (y/N): " snap_confirm
+        if [[ "$snap_confirm" == "y" || "$snap_confirm" == "Y" ]]; then
+            sudo snap remove scrcpy 2>/dev/null || true
+        fi
+    fi
+    if command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+        echo "scrcpy is installed via Flatpak."
+        read -r -p "Remove scrcpy (Flatpak)? (y/N): " fp_confirm
+        if [[ "$fp_confirm" == "y" || "$fp_confirm" == "Y" ]]; then
+            flatpak uninstall -y org.scrcpy.ScrCpy 2>/dev/null || true
+        fi
+    fi
+
+    read -r -p "Remove system dependencies (scrcpy, v4l2loopback etc.)? (y/N): " pkg_confirm
+    if [[ "$pkg_confirm" == "y" || "$pkg_confirm" == "Y" ]]; then
+        local distro="unknown"
+        [ -f /etc/os-release ] && . /etc/os-release && distro="${ID:-unknown}"
+        case "$distro" in
+            ubuntu|debian|pop|linuxmint|zorin|kali|neon) sudo apt remove -y scrcpy v4l2loopback-dkms v4l2loopback-utils ;;
+            arch|manjaro) sudo pacman -Rs scrcpy v4l2loopback-dkms ;;
+            fedora) sudo dnf remove -y scrcpy v4l2loopback v4l2loopback-utils ;;
+            opensuse*|suse) sudo zypper remove -y scrcpy v4l2loopback-kmp-default v4l2loopback-utils ;;
+            *) echo "Please remove packages manually for your distro." ;;
+        esac
+    fi
+
+    echo -e "${GREEN}[OK]${NC} Uninstallation completed."
+    exit 0
+}
+
 # --- Main ---
 
 case "$1" in
@@ -1643,8 +1705,9 @@ case "$1" in
     fix)    cmd_fix ;;
     status) cmd_status ;;
     config) cmd_config ;;
+    uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|fix|status|config}"
+        echo "Usage: $0 {start|stop|toggle|fix|status|config|uninstall}"
         exit 1
         ;;
 esac
