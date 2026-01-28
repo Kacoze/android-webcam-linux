@@ -143,8 +143,12 @@ uninstall() {
         exit 0
     fi
     
+    # Verify sudo before removing /usr/local/bin file (avoids silent exit under set -e)
+    check_sudo
+    
     log_info "Removing files..."
-    rm -f "$HOME/.local/bin/android-webcam-ctl"
+    sudo rm -f /usr/local/bin/android-webcam-ctl
+    rm -f "$HOME/.local/bin/android-webcam-ctl"   # cleanup legacy (old install location)
     rm -f "$HOME/.local/bin/android-cam-toggle.sh" # cleanup legacy
     rm -f "$HOME/.local/bin/android-cam-fix.sh"    # cleanup legacy
     rm -rf "$HOME/.config/android-webcam"
@@ -788,12 +792,15 @@ sleep 2
 # --- STEP 4: INSTALLING SCRIPTS ---
 echo -e "\n${GREEN}[4/5] Installing Control Scripts...${NC}"
 
-BIN_DIR="$HOME/.local/bin"
-mkdir -p "$BIN_DIR"
+BIN_DIR="/usr/local/bin"
+sudo mkdir -p "$BIN_DIR"
 
 log_info "Installing android-webcam-ctl to $BIN_DIR..."
 
-cat << 'EOF' > "$BIN_DIR/android-webcam-ctl"
+TMP_CTL=$(mktemp) || { log_error "Failed to create temp file."; exit 1; }
+trap 'rm -f "$TMP_CTL"' EXIT
+
+cat << 'EOF' > "$TMP_CTL"
 #!/bin/bash
 # android-webcam-ctl
 # Central control script for Android Webcam on Linux
@@ -1558,8 +1565,8 @@ case "$1" in
 esac
 EOF
 
-if ! chmod +x "$BIN_DIR/android-webcam-ctl" 2>/dev/null; then
-    log_error "Failed to make android-webcam-ctl executable!"
+if ! sudo install -m 0755 "$TMP_CTL" "$BIN_DIR/android-webcam-ctl"; then
+    log_error "Failed to install android-webcam-ctl to $BIN_DIR!"
     exit 1
 fi
 
@@ -1602,8 +1609,8 @@ cat << EOF > "$APP_DIR/android-cam.desktop"
 Version=1.0
 Name=Camera Phone
 Comment=Toggle Android Camera
-Exec=android-webcam-ctl toggle
-Path=$HOME/.local/bin
+Exec=/usr/local/bin/android-webcam-ctl toggle
+Path=/usr/local/bin
 Icon=camera-web
 Terminal=false
 Type=Application
@@ -1612,20 +1619,20 @@ Actions=Status;Config;Fix;
 
 [Desktop Action Status]
 Name=Check Status
-Exec=sh -c 'android-webcam-ctl status; read -r -p "Press Enter...";'
-Path=$HOME/.local/bin
+Exec=sh -c '/usr/local/bin/android-webcam-ctl status; read -r -p "Press Enter...";'
+Path=/usr/local/bin
 Terminal=true
 
 [Desktop Action Config]
 Name=Settings
-Exec=android-webcam-ctl config
-Path=$HOME/.local/bin
+Exec=/usr/local/bin/android-webcam-ctl config
+Path=/usr/local/bin
 Terminal=true
 
 [Desktop Action Fix]
 Name=Fix Connection (USB)
-Exec=android-webcam-ctl fix
-Path=$HOME/.local/bin
+Exec=/usr/local/bin/android-webcam-ctl fix
+Path=/usr/local/bin
 Terminal=true
 EOF
 
@@ -1635,7 +1642,7 @@ cat << EOF > "$APP_DIR/android-cam-fix.desktop"
 Version=1.0
 Name=Fix Camera (USB)
 Comment=Reconnect after restart
-Exec="$BIN_DIR/android-webcam-ctl" fix
+Exec=/usr/local/bin/android-webcam-ctl fix
 Icon=smartphone
 Terminal=true
 Type=Application

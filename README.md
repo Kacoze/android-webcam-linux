@@ -50,26 +50,6 @@ Before running the installer, you must enable **USB Debugging** on your phone:
 
 ---
 
-## 🔒 Security / Bezpieczeństwo
-
-**⚠️ Important Security Notice:**
-
-Before running the installation script, please be aware:
-
-*   **Administrator privileges required:** The installer requires `sudo` access to install system packages and kernel modules. Only run this script if you trust the source.
-*   **Review the script:** Before executing any script downloaded from the internet, it's recommended to review its contents first. You can view the script at:
-    ```bash
-    # View the script before running:
-    curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | less
-    ```
-*   **Alternative installation method:** If you prefer not to pipe directly to bash, you can download and review the script first:
-    ```bash
-    wget https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh
-    # Review install.sh, then run:
-    bash install.sh
-    ```
-
----
 
 ## 📥 Installation (One-Liner)
 
@@ -92,11 +72,13 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/in
 
 > **Note:** The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices.
 
+The control script `android-webcam-ctl` is installed to `/usr/local/bin`, so it is available in the terminal and from the application menu without adding any directory to your PATH.
+
 ---
 
 ## 🚀 How to use?
 
-After installation, you will find two new icons in your application menu (Super/Windows key).
+After installation, you will find two new entries in your application menu (Super/Windows key): **Camera Phone** (toggle webcam) and **Fix Camera (USB)** (reconnect after restart). If the icons do not appear immediately, log out and log back in so your desktop refreshes the application list.
 
 ### 1. Daily Usage (Wireless)
 
@@ -430,8 +412,9 @@ bash /tmp/install.sh --uninstall
 **Alternatively, you can manually delete the files:**
 
 ```bash
-# Remove scripts, config, and icons
-rm -f ~/.local/bin/android-webcam-ctl
+# Remove script (installed to /usr/local/bin), config, and icons
+sudo rm -f /usr/local/bin/android-webcam-ctl
+rm -f ~/.local/bin/android-webcam-ctl   # legacy location, if any
 rm -rf ~/.config/android-webcam
 rm -f ~/.local/share/applications/android-cam.desktop
 rm -f ~/.local/share/applications/android-cam-fix.desktop
