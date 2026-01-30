@@ -56,7 +56,6 @@ Before running the installer, you must enable **USB Debugging** on your phone:
 **⚠️ Before proceeding:**
 - Make sure you have **administrator (sudo) privileges** - the installer will prompt for your password
 - Ensure you have an **active internet connection** (required only during installation)
-- The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices
 
 Open a terminal (Ctrl+Alt+T) and paste one of the following commands:
 
@@ -73,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/in
 
 The installer is interactive. When run via pipe (`wget … | bash`), it reads prompts from your terminal (`/dev/tty`). If prompts do not appear or installation fails, download the script and run it locally: `wget …/install.sh` then `bash install.sh`.
 
-> **Note:** The installer will ask you to connect your phone via USB cable once to automatically detect its IP address and pair the devices. You can press **S** to skip this step and pair later with `android-webcam-ctl fix`. If the device is not detected or TCP/IP cannot be enabled, the installer continues without pairing; pair later with `android-webcam-ctl fix`.
+> **Note:** After installation, pair your phone by running `android-webcam-ctl setup` or using the **Setup (fix)** icon in the app menu. Connect the USB cable when prompted, then disconnect. You can also start the camera without prior setup – if IP is not set, setup will run automatically.
 
 The control script `android-webcam-ctl` is installed to `/usr/local/bin`, so it is available in the terminal and from the application menu without adding any directory to your PATH.
 
@@ -81,7 +80,7 @@ The control script `android-webcam-ctl` is installed to `/usr/local/bin`, so it 
 
 ## 🚀 How to use?
 
-After installation, you will find two new entries in your application menu (Super/Windows key): **Camera Phone** (toggle webcam) and **Fix Camera (USB)** (reconnect after restart). If the icons do not appear immediately, log out and log back in so your desktop refreshes the application list.
+After installation, you will find two new entries in your application menu (Super/Windows key): **Camera Phone** (toggle webcam) and **Setup (fix)** (reconnect after restart). If the icons do not appear immediately, log out and log back in so your desktop refreshes the application list.
 
 ### 1. Daily Usage (Wireless)
 
@@ -124,7 +123,7 @@ Right-click the **Camera Phone** icon to access:
 - **Stop Camera**: Turn off the camera (useful in headless mode, when there is no window to close).
 - **Check Status**: See if the camera is running and check current settings. A terminal window opens; press Enter to close it.
 - **Settings**: Opening the configuration file allows you to change back/front camera, resolution, etc.
-- **Fix Connection**: Quick access to USB re-pairing tool.
+- **Setup (fix)**: Quick access to USB re-pairing tool.
 
 When the camera runs without a window (headless), the dock usually does not show that it is active. Use **Check Status** to confirm it is running, or **Stop Camera** when you are done.
 
@@ -132,7 +131,7 @@ When the camera runs without a window (headless), the dock usually does not show
 
 If you restarted your phone or the battery died, Android disables wireless debugging access for security reasons.
 
-1.  Click the **🔧 Fix Camera (USB)** icon (or use Right-Click -> Fix).
+1.  Click the **🔧 Setup (fix)** icon (or use Right-Click → Setup (fix)).
 2.  A message will appear: "Connect phone via USB cable...".
 3.  Connect your phone to the computer for about 3 seconds.
 4.  When you see "Done! You can disconnect the cable", disconnect it.
@@ -241,7 +240,7 @@ If this fails, you may have Secure Boot enabled. Either disable Secure Boot in B
 **I changed my router / network, what to do?**
 If the phone's IP address changed, you can either:
 
-1. Run the installer again to auto-detect the new IP.
+1. Run `android-webcam-ctl setup` (or use the **Setup (fix)** icon) to re-pair and auto-detect the new IP.
 2. Edit the config file manually:
    ```bash
    nano ~/.config/android-webcam/settings.conf
@@ -291,9 +290,9 @@ Troubleshooting steps:
 
 2. **Verify USB debugging is still enabled** - sometimes Android disables it after restart.
 
-3. **Re-run the pairing process** - use the "Fix Camera (USB)" icon or run:
+3. **Re-run the pairing process** - use the "Setup (fix)" icon or run:
    ```bash
-   android-webcam-ctl fix
+   android-webcam-ctl setup
    ```
    Then connect via USB cable and follow the prompts.
 
@@ -362,9 +361,9 @@ After installation, the tool works completely offline. It only needs:
    android-webcam-ctl status
    ```
    to see the current configuration.
-3. **Re-run the pairing process** - use the "Fix Camera (USB)" icon or run:
+3. **Re-run the pairing process** - use the "Setup (fix)" icon or run:
    ```bash
-   android-webcam-ctl fix
+   android-webcam-ctl setup
    ```
    Then connect via USB cable and follow the prompts.
 4. **Test ADB connection manually**:

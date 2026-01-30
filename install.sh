@@ -250,7 +250,7 @@ fi
 echo -e "Detected System: ${BLUE}${DISTRO_CAPITALIZED}${NC}"
 
 # --- STEP 1: DEPENDENCIES ---
-echo -e "\n${GREEN}[1/5] Installing System Dependencies...${NC}"
+echo -e "\n${GREEN}[1/4] Installing System Dependencies...${NC}"
 
 install_deps() {
     case "$DISTRO" in
@@ -622,7 +622,7 @@ if ! ensure_scrcpy; then
 fi
 
 # --- STEP 2: KERNEL MODULE ---
-echo -e "\n${GREEN}[2/5] Configuring V4L2 Module...${NC}"
+echo -e "\n${GREEN}[2/4] Configuring V4L2 Module...${NC}"
 
 CONF_FILE="/etc/modprobe.d/v4l2loopback.conf"
 LOAD_FILE="/etc/modules-load.d/v4l2loopback.conf"
@@ -678,195 +678,8 @@ else
     fi
 fi
 
-# --- STEP 3: PHONE PAIRING ---
-echo -e "\n${GREEN}[3/5] Pairing Phone...${NC}"
-
-# Check if adb is available
-if ! command -v adb >/dev/null 2>&1; then
-    log_error "adb not found! Please install android-tools-adb first."
-    exit 1
-fi
-
-echo "---------------------------------------------------"
-echo " 1. USB Connection: YES (Connect cable now)"
-echo " 2. USB Debugging:  ENABLED (In Developer Options)"
-echo " 3. RSA Prompt:     ACCEPTED (On phone screen)"
-echo "---------------------------------------------------"
-echo ""
-echo -e "${YELLOW}Press Enter to connect phone now, or S to skip (pair later with 'android-webcam-ctl fix').${NC}"
-prompt_read "Your choice: " skip_pairing
-if [[ "$skip_pairing" == "s" || "$skip_pairing" == "S" ]]; then
-    PHONE_IP=""
-    log_warn "Skipped device pairing. You can pair later with: android-webcam-ctl fix"
-else
-STEP3_SKIP=0
-log_info "Waiting for device..."
-if ! adb wait-for-usb-device </dev/null; then
-    log_error "Failed to detect device or operation cancelled."
-    PHONE_IP=""
-    STEP3_SKIP=1
-    log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
-fi
-
-if [ "$STEP3_SKIP" -eq 0 ]; then
-log_success "Device connected!"
-
-# Get USB device ID (in case there are multiple devices)
-USB_DEVICE_ID=""
-# Count only lines with second column "device" (exclude offline/unauthorized)
-DEVICE_COUNT=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
-DEVICE_COUNT=$(echo "$DEVICE_COUNT" | tr -d '\n\r' | head -n 1)
-[ -z "$DEVICE_COUNT" ] || ! [[ "$DEVICE_COUNT" =~ ^[0-9]+$ ]] && DEVICE_COUNT="0"
-if [ "$DEVICE_COUNT" -gt 1 ]; then
-    log_info "Multiple devices detected. Selecting USB device..."
-    # Get the first connected device (second column must be "device")
-    USB_DEVICE_ID=$(adb devices </dev/null 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
-    if [ ! -z "$USB_DEVICE_ID" ]; then
-        log_info "Using device: $USB_DEVICE_ID"
-    fi
-fi
-
-log_info "Detecting Wi-Fi IP address..."
-
-PHONE_IP=""
-# Improved IP detection: try multiple methods
-if command -v awk >/dev/null 2>&1 && command -v cut >/dev/null 2>&1; then
-    # Method 1: Try common Wi-Fi interface names first (fast path)
-    for iface in wlan0 swlan0 wlan1 wlan2 wifi0; do
-        IP=""
-        if [ ! -z "$USB_DEVICE_ID" ]; then
-            IP=$(adb -s "$USB_DEVICE_ID" shell ip -4 -o addr show "$iface" </dev/null 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
-        else
-            IP=$(adb shell ip -4 -o addr show "$iface" </dev/null 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
-        fi
-        if [ ! -z "$IP" ]; then
-            # Validate IP format
-            if validate_ip "$IP"; then
-                PHONE_IP="$IP"
-                log_success "Found IP ($iface): $PHONE_IP"
-                break
-            fi
-        fi
-    done
-    
-    # Method 2: If not found, enumerate all interfaces and find Wi-Fi ones
-    if [ -z "$PHONE_IP" ]; then
-        log_info "Scanning all network interfaces..."
-        # Get all interfaces with IPv4 addresses
-        ALL_IPS=""
-        if [ ! -z "$USB_DEVICE_ID" ]; then
-            ALL_IPS=$(adb -s "$USB_DEVICE_ID" shell ip -4 -o addr show </dev/null 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
-        else
-            ALL_IPS=$(adb shell ip -4 -o addr show </dev/null 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
-        fi
-        
-        if [ ! -z "$ALL_IPS" ]; then
-            # Process each interface
-            while IFS= read -r line || [ -n "$line" ]; do
-                if [ -z "$line" ]; then
-                    continue
-                fi
-                # Extract interface name and IP
-                iface=$(echo "$line" | cut -d: -f1 | tr -d '[:space:]')
-                IP=$(echo "$line" | cut -d: -f2 | tr -d '[:space:]')
-                
-                # Skip loopback and non-Wi-Fi interfaces (heuristic: wlan, wifi, wlp in name)
-                if [[ "$iface" == "lo" ]] || [[ "$iface" == "lo:"* ]]; then
-                    continue
-                fi
-                
-                # Check if interface name suggests Wi-Fi (wlan, wifi, wlp, etc.)
-                if [[ "$iface" =~ ^(wlan|wifi|wlp|swlan) ]] || [[ "$iface" =~ (wlan|wifi|wlp) ]]; then
-                    if [ ! -z "$IP" ] && validate_ip "$IP"; then
-                        PHONE_IP="$IP"
-                        log_success "Found IP ($iface): $PHONE_IP"
-                        break
-                    fi
-                fi
-            done <<< "$ALL_IPS"
-        fi
-        
-        # Method 3: If still not found, try any non-loopback interface with valid IP
-        if [ -z "$PHONE_IP" ] && [ ! -z "$ALL_IPS" ]; then
-            log_info "Trying any available network interface..."
-            while IFS= read -r line || [ -n "$line" ]; do
-                if [ -z "$line" ]; then
-                    continue
-                fi
-                iface=$(echo "$line" | cut -d: -f1 | tr -d '[:space:]')
-                IP=$(echo "$line" | cut -d: -f2 | tr -d '[:space:]')
-                
-                # Skip loopback
-                if [[ "$iface" == "lo" ]] || [[ "$iface" == "lo:"* ]]; then
-                    continue
-                fi
-                
-                if [ ! -z "$IP" ] && validate_ip "$IP"; then
-                    # Check if it's a private IP (likely local network)
-                    if [[ "$IP" =~ ^10\. ]] || [[ "$IP" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] || [[ "$IP" =~ ^192\.168\. ]]; then
-                        PHONE_IP="$IP"
-                        log_success "Found IP ($iface): $PHONE_IP"
-                        break
-                    fi
-                fi
-            done <<< "$ALL_IPS"
-        fi
-    fi
-else
-    log_warn "awk or cut not found, skipping auto-detection."
-fi
-
-if [ -z "$PHONE_IP" ]; then
-    log_warn "Could not auto-detect Wi-Fi IP address."
-    echo ""
-    echo "This may happen if:"
-    echo "  - Phone is not connected to Wi-Fi"
-    echo "  - Phone and computer are on different networks"
-    echo "  - ADB cannot access network interface information"
-    echo ""
-    log_info "Enter the phone's Wi-Fi IP address, or S to skip (pair later with 'android-webcam-ctl fix')."
-    while true; do
-        prompt_read "Phone IP (e.g. 192.168.1.50) or S to skip: " PHONE_IP
-        PHONE_IP=$(echo "$PHONE_IP" | tr -d '[:space:]')
-        if [[ "$PHONE_IP" == "s" || "$PHONE_IP" == "S" ]]; then
-            PHONE_IP=""
-            log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
-            break
-        fi
-        if [ -z "$PHONE_IP" ]; then
-            log_error "Invalid IP address format. Please try again or enter S to skip."
-            continue
-        fi
-        if validate_ip "$PHONE_IP"; then
-            log_success "Using manually entered IP: $PHONE_IP"
-            break
-        fi
-        log_error "Invalid IP address format. Please try again."
-    done
-fi
-
-# Enable TCP/IP
-if [ ! -z "$USB_DEVICE_ID" ]; then
-    log_info "Enabling TCP/IP mode on device $USB_DEVICE_ID..."
-    if ! adb -s "$USB_DEVICE_ID" tcpip 5555 </dev/null; then
-        log_error "Failed to enable TCP/IP mode on device."
-        PHONE_IP=""
-        log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
-    fi
-else
-    log_info "Enabling TCP/IP mode..."
-    if ! adb tcpip 5555 </dev/null; then
-        log_error "Failed to enable TCP/IP mode on device."
-        PHONE_IP=""
-        log_warn "Skipped pairing. After installation finishes, run: android-webcam-ctl fix"
-    fi
-fi
-sleep 2
-fi
-fi
-
-# --- STEP 4: INSTALLING SCRIPTS ---
-echo -e "\n${GREEN}[4/5] Installing Control Scripts...${NC}"
+# --- STEP 3: INSTALLING SCRIPTS ---
+echo -e "\n${GREEN}[3/4] Installing Control Scripts...${NC}"
 
 BIN_DIR="/usr/local/bin"
 sudo mkdir -p "$BIN_DIR"
@@ -918,15 +731,15 @@ log_info "Installing android-webcam-run-in-terminal to $BIN_DIR..."
 TMP_RUNTERM=$(mktemp) || { log_error "Failed to create temp file for run-in-terminal."; exit 1; }
 cat << 'RUNTERMEOF' > "$TMP_RUNTERM"
 #!/bin/bash
-# android-webcam-run-in-terminal - run android-webcam-ctl status/config/fix in a terminal (for desktop actions)
+# android-webcam-run-in-terminal - run android-webcam-ctl status/config/setup in a terminal (for desktop actions)
 
 set -e
 CTL="/usr/local/bin/android-webcam-ctl"
 case "${1:-}" in
     status)  CMD="$CTL status; read -r -p \"Press Enter to close...\"; exec bash" ;;
     config)  CMD="$CTL config" ;;
-    fix)     CMD="$CTL fix" ;;
-    *)       echo "Usage: $0 {status|config|fix}" >&2; exit 1 ;;
+    setup)   CMD="$CTL setup" ;;
+    *)       echo "Usage: $0 {status|config|setup}" >&2; exit 1 ;;
 esac
 
 run_in_term() {
@@ -1159,9 +972,17 @@ cmd_start() {
     fi
     
     if [ -z "$PHONE_IP" ]; then
-        echo -e "${RED}Error:${NC} PHONE_IP not set. Run '$0 config' to edit settings."
-        notify "critical" "Android Camera" "Config Error: No IP set" "error"
-        return 1
+        echo -e "${BLUE}Phone IP not set. Running setup (connect USB when prompted)...${NC}"
+        notify "normal" "Android Camera" "Running setup – connect USB when prompted" "camera-web"
+        cmd_fix
+        if ! load_config; then
+            return 1
+        fi
+        if [ -z "$PHONE_IP" ]; then
+            echo -e "${RED}Error:${NC} PHONE_IP not set. Run '$0 setup' or '$0 config' to set it."
+            notify "critical" "Android Camera" "Config Error: No IP set" "error"
+            return 1
+        fi
     fi
     
     # Validate IP format
@@ -1531,7 +1352,7 @@ Or reboot your system." 2>/dev/null || true
             echo -e "${GREEN}Started successfully (PID: $PID)${NC}"
             notify "normal" "Android Camera" "✅ Active (PID: $PID)"
             if [[ "$show_window_lower" == "false" || "$show_window_lower" == "0" || "$show_window_lower" == "no" ]]; then
-                notify "normal" "Android Camera" "Kamera działa w tle (bez okna). Zatrzymaj: prawy przycisk na ikonę → Stop." "camera-web"
+                notify "normal" "Android Camera" "Camera runs in background (no window). To stop: right-click icon → Stop Camera." "camera-web"
             fi
         else
             rm -f "$PID_FILE" 2>/dev/null
@@ -1551,7 +1372,7 @@ Or reboot your system." 2>/dev/null || true
         echo -e "${GREEN}Started (PID: $PID)${NC}"
         notify "normal" "Android Camera" "✅ Active (PID: $PID)"
         if [[ "$show_window_lower" == "false" || "$show_window_lower" == "0" || "$show_window_lower" == "no" ]]; then
-            notify "normal" "Android Camera" "Kamera działa w tle (bez okna). Zatrzymaj: prawy przycisk na ikonę → Stop." "camera-web"
+            notify "normal" "Android Camera" "Camera runs in background (no window). To stop: right-click icon → Stop Camera." "camera-web"
         fi
     fi
 }
@@ -1929,15 +1750,16 @@ cmd_uninstall() {
 # --- Main ---
 
 case "$1" in
-    start)  cmd_start ;;
-    stop)   cmd_stop ;;
-    toggle) cmd_toggle ;;
-    fix)    cmd_fix ;;
-    status) cmd_status ;;
-    config) cmd_config ;;
+    start)   cmd_start ;;
+    stop)    cmd_stop ;;
+    toggle)  cmd_toggle ;;
+    setup)   cmd_fix ;;
+    fix)     cmd_fix ;;  # backward compatibility
+    status)  cmd_status ;;
+    config)  cmd_config ;;
     uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|fix|status|config|uninstall}"
+        echo "Usage: $0 {start|stop|toggle|setup|status|config|uninstall}"
         exit 1
         ;;
 esac
@@ -1956,29 +1778,11 @@ mkdir -p "$CONFIG_DIR"
 # Only create if doesn't exist to respect user edits on re-install
 if [ ! -f "$CONFIG_FILE" ]; then
     log_info "Creating initial configuration..."
-    # Additional safety check: ensure IP doesn't contain dangerous characters
-    # (IP is already validated, but this is defense in depth)
-    if [[ "$PHONE_IP" =~ [\"\`\$] ]]; then
-        log_warn "IP contains unsafe characters. Clearing IP for safety."
-        PHONE_IP=""
-    fi
-    # Use printf for safe file creation instead of heredoc with interpolation
-    printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments\nSHOW_WINDOW="true"\n' "$PHONE_IP" > "$CONFIG_FILE"
-else
-    log_info "Updating IP in existing config..."
-    # File exists (we're in the else block), so update it
-    # Escape special characters in PHONE_IP for safe use in sed
-    # Note: sed -i without suffix works on GNU sed (Linux)
-    # On BSD sed (macOS), would need: sed -i '' "s|..."
-    ESCAPED_IP=$(printf '%s\n' "$PHONE_IP" | sed 's/[\[\.*^$()+?{|}]/\\&/g')
-    if ! sed -i "s|PHONE_IP=.*|PHONE_IP=\"$ESCAPED_IP\"|" "$CONFIG_FILE" 2>/dev/null; then
-        log_warn "Could not update IP in config. Please edit $CONFIG_FILE manually."
-        log_warn "Set: PHONE_IP=\"$PHONE_IP\""
-    fi
+    printf '# Android Webcam Configuration\nPHONE_IP=""\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments\nSHOW_WINDOW="true"\n' > "$CONFIG_FILE"
 fi
 
-# --- STEP 5: ICONS ---
-echo -e "\n${GREEN}[5/5] Creating Launcher Icons...${NC}"
+# --- STEP 4: ICONS ---
+echo -e "\n${GREEN}[4/4] Creating Launcher Icons...${NC}"
 APP_DIR="$HOME/.local/share/applications"
 mkdir -p "$APP_DIR"
 
@@ -1994,7 +1798,7 @@ Terminal=false
 Type=Application
 Categories=Utility;Video;
 StartupWMClass=scrcpy
-Actions=Status;Config;Fix;Stop;
+Actions=Status;Config;Setup;Stop;
 
 [Desktop Action Status]
 Name=Check Status
@@ -2008,9 +1812,9 @@ Exec=/usr/local/bin/android-webcam-run-in-terminal config
 Path=/usr/local/bin
 Terminal=false
 
-[Desktop Action Fix]
-Name=Fix Connection (USB)
-Exec=/usr/local/bin/android-webcam-run-in-terminal fix
+[Desktop Action Setup]
+Name=Setup (fix)
+Exec=/usr/local/bin/android-webcam-run-in-terminal setup
 Path=/usr/local/bin
 Terminal=false
 
@@ -2021,13 +1825,13 @@ Path=/usr/local/bin
 Terminal=false
 EOF
 
-# Separate Fix Icon (Optional but useful)
+# Separate Setup (fix) Icon (Optional but useful)
 cat << EOF > "$APP_DIR/android-cam-fix.desktop"
 [Desktop Entry]
 Version=1.0
-Name=Fix Camera (USB)
+Name=Setup (fix)
 Comment=Reconnect after restart
-Exec=/usr/local/bin/android-webcam-run-in-terminal fix
+Exec=/usr/local/bin/android-webcam-run-in-terminal setup
 Icon=smartphone
 Terminal=false
 Type=Application
@@ -2042,7 +1846,8 @@ fi
 echo -e "\n${BLUE}=========================================${NC}"
 echo -e "${GREEN}   ✨ INSTALLATION COMPLETE! ✨          ${NC}"
 echo -e "${BLUE}=========================================${NC}"
-echo "1. Unplug USB Cable."
-echo "2. Use 'Camera Phone' icon to toggle webcam."
+echo "What's next:"
+echo "1. To pair your phone and set IP: run 'android-webcam-ctl setup' or use the 'Setup (fix)' icon in the app menu. Connect USB when prompted, then disconnect."
+echo "2. Use the 'Camera Phone' icon to toggle the webcam."
 echo "3. Run 'android-webcam-ctl config' to change settings."
 echo ""
