@@ -120,6 +120,9 @@ The camera should appear automatically as "Android Cam" in browser permission di
 ### 3. Advanced Controls (Right-Click)
 
 Right-click the **Camera Phone** icon to access:
+
+![Camera icon context menu](assets/camera-context-menu.png)
+
 - **Stop Camera**: Turn off the camera (useful in headless mode, when there is no window to close).
 - **Check Status**: See if the camera is running and check current settings. A terminal window opens; press Enter to close it.
 - **Settings**: Opening the configuration file allows you to change back/front camera, resolution, etc.
