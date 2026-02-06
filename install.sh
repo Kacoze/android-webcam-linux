@@ -435,16 +435,16 @@ install_scrcpy_github() {
     local latest_url
     if echo "test" | grep -o "test" >/dev/null 2>&1; then
         if command -v head >/dev/null 2>&1; then
-            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | head -n 1)
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.[a-z0-9]\+" | head -n 1)
         else
-            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz" | sed -n '1p')
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.[a-z0-9]\+" | sed -n '1p')
         fi
     else
         # Fallback using sed (more portable)
         if command -v head >/dev/null 2>&1; then
-            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | head -n 1)
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\\.tar\\.[a-z0-9]\\+\\)\".*|\\1|p" | head -n 1)
         else
-            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.xz\)\".*|\1|p" | sed -n '1p')
+            latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | sed -n "s|.*\"\\(https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\\.tar\\.[a-z0-9]\\+\\)\".*|\\1|p" | sed -n '1p')
         fi
     fi
     
@@ -515,6 +515,23 @@ install_scrcpy_github() {
         trap - INT TERM EXIT
         return 1
     fi
+
+    # Find the server payload (required by scrcpy at runtime).
+    # Linux release archives typically include either:
+    # - scrcpy-server        (current releases)
+    # - scrcpy-server.jar    (older releases / distro builds)
+    local found_server=""
+    if command -v head >/dev/null 2>&1; then
+        found_server=$(find "$extract_dir" -type f \( -name "scrcpy-server" -o -name "scrcpy-server.jar" -o -name "scrcpy-server*" \) ! -name "*.1" | head -n 1)
+    else
+        found_server=$(find "$extract_dir" -type f \( -name "scrcpy-server" -o -name "scrcpy-server.jar" -o -name "scrcpy-server*" \) ! -name "*.1" | sed -n '1p')
+    fi
+    if [ -z "$found_server" ]; then
+        log_warn "scrcpy server payload not found in release archive. Skipping GitHub method."
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
     
     if ! cp "$found_bin" "$download_dir/scrcpy" 2>/dev/null; then
         log_warn "Failed to copy scrcpy binary, skipping..."
@@ -529,13 +546,28 @@ install_scrcpy_github() {
         trap - INT TERM EXIT
         return 1
     fi
+
+    # Install server payload next to scrcpy binary so scrcpy can find it.
+    # Normalize destination name to what scrcpy expects.
+    local server_dest=""
+    case "$(basename "$found_server")" in
+        *.jar) server_dest="$download_dir/scrcpy-server.jar" ;;
+        *)     server_dest="$download_dir/scrcpy-server" ;;
+    esac
+    if ! cp "$found_server" "$server_dest" 2>/dev/null; then
+        log_warn "Failed to copy scrcpy server payload, skipping..."
+        cleanup_temp_files
+        trap - INT TERM EXIT
+        return 1
+    fi
+    chmod 0644 "$server_dest" 2>/dev/null || true
     
     local scrcpy_bin="$download_dir/scrcpy"
     local current_ver=$(check_scrcpy_version "$scrcpy_bin")
     if version_compare "$REQUIRED_VER" "$current_ver"; then
         cleanup_temp_files
         trap - INT TERM EXIT
-        log_success "Downloaded and installed scrcpy v$current_ver to $download_dir"
+        log_success "Downloaded and installed scrcpy v$current_ver (+ server payload) to $download_dir"
         return 0
     fi
     
@@ -705,18 +737,87 @@ validate_ip() {
     return 1
 }
 
-find_scrcpy() {
-    if command -v scrcpy >/dev/null 2>&1; then
-        echo "$(command -v scrcpy)"
-    elif [ -f /snap/bin/scrcpy ]; then
-        echo "/snap/bin/scrcpy"
-    elif [ -f "$HOME/.local/bin/scrcpy" ]; then
-        echo "$HOME/.local/bin/scrcpy"
-    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
-        echo "flatpak run org.scrcpy.ScrCpy"
+check_scrcpy_version() {
+    local scrcpy_bin="$1"
+    if [ -z "$scrcpy_bin" ] || [ ! -x "$scrcpy_bin" ]; then
+        echo "0.0"
+        return
+    fi
+    local version_output
+    version_output=$("$scrcpy_bin" --version 2>/dev/null || echo "")
+    if [ -z "$version_output" ]; then
+        echo "0.0"
+        return
+    fi
+    # Extract version using sed (portable)
+    if command -v head >/dev/null 2>&1; then
+        echo "$version_output" | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0"
     else
+        echo "$version_output" | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "0.0"
+    fi
+}
+
+version_compare() {
+    # Compare versions using sort -V: check if current >= required
+    local required="$1"
+    local current="$2"
+    if [ "$current" = "0.0" ]; then
         return 1
     fi
+    if ! command -v sort >/dev/null 2>&1; then
+        # Without sort -V we cannot reliably compare; accept current.
+        return 0
+    fi
+    local smallest
+    if command -v head >/dev/null 2>&1; then
+        smallest=$(printf '%s\n' "$required" "$current" | sort -V | head -n 1)
+    else
+        smallest=$(printf '%s\n' "$required" "$current" | sort -V | sed -n '1p')
+    fi
+    [ "$smallest" = "$required" ]
+}
+
+scrcpy_is_compatible() {
+    local bin="$1"
+    local required="2.0"
+    local current
+    current=$(check_scrcpy_version "$bin")
+    version_compare "$required" "$current"
+}
+
+find_scrcpy() {
+    # Prefer the self-installed GitHub fallback (and generally newer builds),
+    # then Snap, then system PATH, then Flatpak.
+    if [ -x "$HOME/.local/bin/scrcpy" ] && scrcpy_is_compatible "$HOME/.local/bin/scrcpy"; then
+        echo "$HOME/.local/bin/scrcpy"
+        return 0
+    fi
+    if [ -x /snap/bin/scrcpy ] && scrcpy_is_compatible "/snap/bin/scrcpy"; then
+        echo "/snap/bin/scrcpy"
+        return 0
+    fi
+    if command -v scrcpy >/dev/null 2>&1; then
+        local path_bin
+        path_bin="$(command -v scrcpy)"
+        if [ -x "$path_bin" ] && scrcpy_is_compatible "$path_bin"; then
+            echo "$path_bin"
+            return 0
+        fi
+    fi
+    if command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+        # Flatpak version check (best-effort)
+        local v="0.0"
+        if command -v head >/dev/null 2>&1; then
+            v=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "0.0")
+        else
+            v=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "0.0")
+        fi
+        if version_compare "2.0" "$v"; then
+            echo "flatpak run org.scrcpy.ScrCpy"
+            return 0
+        fi
+    fi
+    return 1
 }
 COMMONEOF
 if ! sudo install -m 0644 "$TMP_COMMON" "$BIN_DIR/android-webcam-common"; then

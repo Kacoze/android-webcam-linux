@@ -36,6 +36,8 @@ Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone an
     
     **Note:** After installation, the tool works completely offline. No internet connection is needed for daily use.
 
+For a clear support/compatibility scope (what is supported automatically, common blockers like Secure Boot, immutable distros, etc.), see: **[`COMPATIBILITY.md`](COMPATIBILITY.md)**.
+
 ### Hardware Requirements
 
 - **Kernel:** Linux kernel 3.6 or newer (for v4l2loopback support)
