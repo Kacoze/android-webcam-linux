@@ -159,6 +159,7 @@ VIDEO_SIZE=""             # Max dimension in pixels (e.g., "1080" for 1080p), le
 BIT_RATE="8M"             # Higher = better quality, more latency
 EXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments
 SHOW_WINDOW="true"        # false = no camera window (headless); image only to /dev/video10
+RELOAD_V4L2_ON_STOP="true"  # true = reload v4l2loopback when stopping (so Meet/Zoom see camera on next start); set false if you use other loopback devices
 ```
 
 ### Example Configurations
@@ -240,6 +241,9 @@ If empty, try loading it manually:
 sudo modprobe v4l2loopback
 ```
 If this fails, you may have Secure Boot enabled. Either disable Secure Boot in BIOS or sign the kernel module.
+
+**Google Meet or Zoom does not detect the camera after I turn the camera off and on again?**
+This is caused by a known v4l2loopback quirk with `exclusive_caps=1`: after the producer (our tool) stops, the virtual device can end up in a state where the next start shows the preview window but browsers no longer see the camera. The tool fixes this automatically: when you click **Stop Camera** (or toggle off), it reloads the v4l2loopback module so the next start works correctly. You may see a **password prompt** (PolicyKit) when stopping; enter your user password so the module can be reloaded. If you cancel the prompt (or the reload fails), the next start may still not be visible in Meet/Zoom—click **Stop Camera** once more and accept the prompt. As a last resort, reboot.
 
 **I changed my router / network, what to do?**
 If the phone's IP address changed, you can either:
@@ -326,6 +330,12 @@ After installation, the tool works completely offline. It only needs:
 ## 🔧 Troubleshooting
 
 ### Common Issues
+
+#### Camera not detected in Meet/Zoom after turning camera off and on again
+
+**Symptoms:** You stop the camera, then start it again. The preview window appears and seems to work, but Google Meet, Zoom, or the browser does not list or use the camera. Restarting the PC fixes it.
+
+**Explanation:** This is due to a v4l2loopback limitation with `exclusive_caps=1`. When you click **Stop Camera**, the tool reloads the v4l2loopback module so that the next start uses a clean device and the camera is visible again in Meet/Zoom. A password dialog (pkexec/PolicyKit) may appear when you stop the camera; this is normal and allows the reload to complete. If you cancel it (or the reload fails), click **Stop Camera** again and accept the prompt. As a last resort, reboot.
 
 #### "v4l2loopback module not found" or "/dev/video10 missing"
 

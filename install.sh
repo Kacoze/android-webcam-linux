@@ -806,6 +806,7 @@ DEFAULT_CAMERA_FACING="back" # front, back, external
 DEFAULT_VIDEO_SIZE=""        # e.g. 1080 (max dimension in pixels, empty = max supported)
 DEFAULT_BIT_RATE="8M"
 DEFAULT_ARGS="--no-audio --v4l2-buffer=400"
+DEFAULT_RELOAD_V4L2_ON_STOP="true"
 
 # Colors
 GREEN='\033[0;32m'
@@ -890,6 +891,7 @@ VIDEO_SIZE="$DEFAULT_VIDEO_SIZE"
 BIT_RATE="$DEFAULT_BIT_RATE"
 EXTRA_ARGS="$DEFAULT_ARGS"
 SHOW_WINDOW="true"
+RELOAD_V4L2_ON_STOP="$DEFAULT_RELOAD_V4L2_ON_STOP"
 END_CONF
     fi
     
@@ -903,6 +905,7 @@ VIDEO_SIZE="$DEFAULT_VIDEO_SIZE"
 BIT_RATE="$DEFAULT_BIT_RATE"
 EXTRA_ARGS="$DEFAULT_ARGS"
 SHOW_WINDOW="true"
+RELOAD_V4L2_ON_STOP="$DEFAULT_RELOAD_V4L2_ON_STOP"
 END_CONF
     fi
 
@@ -911,8 +914,9 @@ END_CONF
         echo "Please check the file for syntax errors."
         return 1
     fi
-    # Default for existing configs without SHOW_WINDOW
+    # Default for existing configs without SHOW_WINDOW or RELOAD_V4L2_ON_STOP
     SHOW_WINDOW="${SHOW_WINDOW:-true}"
+    RELOAD_V4L2_ON_STOP="${RELOAD_V4L2_ON_STOP:-$DEFAULT_RELOAD_V4L2_ON_STOP}"
 }
 
 # --- Helpers ---
@@ -1405,6 +1409,33 @@ cmd_stop() {
         fi
     fi
 
+    # Reload v4l2loopback so device is in clean state for next start (fixes Meet/Zoom not seeing camera after stop+start)
+    if $was_running; then
+        load_config 2>/dev/null || true
+        reload_opt="${RELOAD_V4L2_ON_STOP:-true}"
+        reload_lower=$(echo "$reload_opt" | tr '[:upper:]' '[:lower:]')
+        if [[ "$reload_lower" != "false" && "$reload_lower" != "0" && "$reload_lower" != "no" ]]; then
+            if lsmod 2>/dev/null | grep -q v4l2loopback; then
+                local reload_ok=false
+                # Give scrcpy time to fully release /dev/video10 before unloading module
+                sleep 2
+                if command -v pkexec >/dev/null 2>&1; then
+                    if pkexec sh -c "modprobe -r v4l2loopback 2>/dev/null; modprobe v4l2loopback" 2>/dev/null; then
+                        reload_ok=true
+                    fi
+                fi
+                if [ "$reload_ok" = false ] && command -v sudo >/dev/null 2>&1; then
+                    sudo sh -c "modprobe -r v4l2loopback 2>/dev/null; modprobe v4l2loopback" 2>/dev/null && reload_ok=true
+                fi
+                if [ "$reload_ok" = true ]; then
+                    sleep 1
+                else
+                    notify "normal" "Android Camera" "Could not reload video module. If Meet/Zoom does not see the camera next time, click Stop again and enter the password prompt (if shown) or reboot." "dialog-warning"
+                fi
+            fi
+        fi
+    fi
+
     if $was_running; then
         echo -e "${YELLOW}Stopped.${NC}"
         notify "low" "Android Camera" "⏹ Stopped"
@@ -1586,7 +1617,7 @@ cmd_fix() {
             fi
         else
             mkdir -p "$CONFIG_DIR"
-            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\nSHOW_WINDOW="true"\n' "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
+            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\nSHOW_WINDOW="true"\nRELOAD_V4L2_ON_STOP="true"\n' "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
                 echo -e "${GREEN}Saved IP to config: $detected_ip${NC}"
         fi
     fi
@@ -1778,7 +1809,7 @@ mkdir -p "$CONFIG_DIR"
 # Only create if doesn't exist to respect user edits on re-install
 if [ ! -f "$CONFIG_FILE" ]; then
     log_info "Creating initial configuration..."
-    printf '# Android Webcam Configuration\nPHONE_IP=""\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments\nSHOW_WINDOW="true"\n' > "$CONFIG_FILE"
+    printf '# Android Webcam Configuration\nPHONE_IP=""\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments\nSHOW_WINDOW="true"\nRELOAD_V4L2_ON_STOP="true"\n' > "$CONFIG_FILE"
 fi
 
 # --- STEP 4: ICONS ---
