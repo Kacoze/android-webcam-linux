@@ -1851,3 +1851,6 @@ echo "1. To pair your phone and set IP: run 'android-webcam-ctl setup' or use th
 echo "2. Use the 'Camera Phone' icon to toggle the webcam."
 echo "3. Run 'android-webcam-ctl config' to change settings."
 echo ""
+echo -e "${YELLOW}Did I save you some time? A virtual coffee is a great way to say thanks!${NC}"
+echo -e "${BLUE}☕ https://buycoffee.to/kacoze ${NC}"
+echo ""

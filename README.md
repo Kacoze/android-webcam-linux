@@ -6,6 +6,7 @@ Turn your Android phone into a professional HD webcam for Linux.
 ![Bash](https://img.shields.io/badge/Language-Bash-4EAA25?style=flat-square)
 ![OS](https://img.shields.io/badge/OS-Linux%20(Universal)-orange?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
+[![Support](https://img.shields.io/badge/Support-Buy%20me%20a%20coffee-orange?style=flat-square&logo=buy-me-a-coffee)](https://buycoffee.to/kacoze)
 
 ## ✨ Why this solution?
 
@@ -470,3 +471,11 @@ This project is a wrapper using brilliant Open Source tools:
 
 *   [scrcpy](https://github.com/Genymobile/scrcpy) (Genymobile)
 *   [v4l2loopback](https://github.com/umlaeute/v4l2loopback)
+
+## ☕ Support
+
+Did I save you some time or solve a problem for you? A virtual coffee is a great way to say thanks! ☕
+
+<a href="https://buycoffee.to/kacoze">
+    <img src="https://buycoffee.to/btn/buycoffeeto-btn-primary.svg" width="170" alt="Buy me a coffee">
+</a>
