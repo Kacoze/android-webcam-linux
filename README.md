@@ -476,6 +476,4 @@ This project is a wrapper using brilliant Open Source tools:
 
 Did I save you some time or solve a problem for you? A virtual coffee is a great way to say thanks! ☕
 
-<a href="https://buycoffee.to/kacoze">
-    <img src="https://buycoffee.to/btn/buycoffeeto-btn-primary.svg" width="170" alt="Buy me a coffee">
-</a>
+[![Support](https://img.shields.io/badge/Support-Buy%20me%20a%20coffee-orange?style=for-the-badge&logo=buy-me-a-coffee)](https://buycoffee.to/kacoze)
