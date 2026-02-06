@@ -8,6 +8,8 @@ Turn your Android phone into a professional HD webcam for Linux.
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 [![Support](https://img.shields.io/badge/Support-Buy%20me%20a%20coffee-orange?style=flat-square&logo=buy-me-a-coffee)](https://buycoffee.to/kacoze)
 
+![Android Webcam demo](assets/mov.gif)
+
 ## ✨ Why this solution?
 
 Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone and computer, often containing ads or resolution limits. This project offers:
