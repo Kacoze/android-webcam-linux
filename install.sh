@@ -433,7 +433,7 @@ install_scrcpy_github() {
     
     # Get latest release URL
     local latest_url
-    if echo "test" | grep -o "test" >/dev/null 2>&1; then
+    if command -v grep >/dev/null 2>&1; then
         if command -v head >/dev/null 2>&1; then
             latest_url=$(curl -s https://api.github.com/repos/Genymobile/scrcpy/releases/latest | grep -o "https://github.com/Genymobile/scrcpy/releases/download/[^\"]*scrcpy-.*-linux-${arch}\.tar\.[a-z0-9]\+" | head -n 1)
         else
@@ -461,7 +461,6 @@ install_scrcpy_github() {
     fi
     
     # Cleanup function
-    local cleanup_temp_files
     cleanup_temp_files() {
         if [ ! -z "$extract_dir" ] && [ -d "$extract_dir" ]; then
             rm -rf "$extract_dir" 2>/dev/null
@@ -1566,10 +1565,21 @@ cmd_fix() {
     echo "Press Ctrl+C to cancel"
     
     # Handle interruption
-    if ! adb wait-for-usb-device; then
-        echo -e "${YELLOW}Cancelled.${NC}"
-        notify "low" "Camera Setup" "Cancelled" "smartphone"
-        return 1
+    local wait_timeout
+    wait_timeout="${ADB_WAIT_TIMEOUT:-60}"
+    if command -v timeout >/dev/null 2>&1; then
+        if ! timeout "$wait_timeout" adb wait-for-usb-device; then
+            echo -e "${YELLOW}Cancelled or timed out waiting for USB device.${NC}"
+            echo "Tip: Set ADB_WAIT_TIMEOUT (seconds) to change this timeout."
+            notify "low" "Camera Setup" "Cancelled or timed out" "smartphone"
+            return 1
+        fi
+    else
+        if ! adb wait-for-usb-device; then
+            echo -e "${YELLOW}Cancelled.${NC}"
+            notify "low" "Camera Setup" "Cancelled" "smartphone"
+            return 1
+        fi
     fi
     
     # Get USB device ID (in case there are multiple devices - any state: device, unauthorized, offline)
