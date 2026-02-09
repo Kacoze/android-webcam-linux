@@ -15,7 +15,7 @@ Turn your Android phone into a professional HD webcam for Linux.
 Most solutions (DroidCam, Iriun) require installing "bloatware" on both phone and computer, often containing ads or resolution limits. This project offers:
 
 *   🚀 **Zero apps on phone** (uses built-in USB debugging).
-*   ⚡ **Ultra low latency** (via P2P protocol and `scrcpy`).
+*   ⚡ **Ultra low latency** (via ADB over TCP/IP and `scrcpy`).
 *   🎥 **High Quality** (HD/Full HD depending on phone).
 *   🐧 **Native Integration** (visible as `/dev/video10` in Zoom, Teams, OBS, Chrome).
 *   🔋 **Battery Saving** (phone screen typically turns off during operation to save battery).
