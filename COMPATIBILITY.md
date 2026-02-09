@@ -1,6 +1,6 @@
 # Compatibility / Support Policy
 
-This project can work on **many** Linux distributions, but it cannot be guaranteed to work on **all** “Linuxes”.
+This project can work on **many** Linux distributions, but it cannot be guaranteed to work on **all** distributions.
 Linux differs by kernel configuration, Secure Boot policy, packaging, immutability (OSTree), containerization, etc.
 
 This document defines what is **supported**, what is **expected to work**, and what is **out of scope**.
@@ -105,4 +105,3 @@ We do not currently provide an automated installer path for:
 
 If you want first-class support for a missing distro family, contributions are welcome:
 please include a tested package list and any special handling notes.
-

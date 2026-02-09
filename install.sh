@@ -935,26 +935,47 @@ trap cleanup_on_exit INT TERM
 
 check_dependencies() {
     local missing=()
-    
+
     if ! command -v adb >/dev/null 2>&1; then
         missing+=("adb")
     fi
-    
-    local scrcpy_found=false
-    if command -v scrcpy >/dev/null 2>&1; then
-        scrcpy_found=true
-    elif [ -f /snap/bin/scrcpy ]; then
-        scrcpy_found=true
-    elif [ -f "$HOME/.local/bin/scrcpy" ]; then
-        scrcpy_found=true
-    elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
-        scrcpy_found=true
+
+    local scrcpy_bin=""
+    if scrcpy_bin=$(find_scrcpy 2>/dev/null); then
+        :
+    else
+        local scrcpy_found=false
+        local scrcpy_version="unknown"
+        local scrcpy_location=""
+        if [ -x "$HOME/.local/bin/scrcpy" ]; then
+            scrcpy_found=true
+            scrcpy_location="$HOME/.local/bin/scrcpy"
+            scrcpy_version=$(check_scrcpy_version "$scrcpy_location")
+        elif [ -x /snap/bin/scrcpy ]; then
+            scrcpy_found=true
+            scrcpy_location="/snap/bin/scrcpy"
+            scrcpy_version=$(check_scrcpy_version "$scrcpy_location")
+        elif command -v scrcpy >/dev/null 2>&1; then
+            scrcpy_found=true
+            scrcpy_location="$(command -v scrcpy)"
+            scrcpy_version=$(check_scrcpy_version "$scrcpy_location")
+        elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q org.scrcpy.ScrCpy; then
+            scrcpy_found=true
+            scrcpy_location="flatpak run org.scrcpy.ScrCpy"
+            if command -v head >/dev/null 2>&1; then
+                scrcpy_version=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "unknown")
+            else
+                scrcpy_version=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "unknown")
+            fi
+        fi
+
+        if [ "$scrcpy_found" = true ]; then
+            missing+=("scrcpy>=2.0 (found $scrcpy_version at $scrcpy_location)")
+        else
+            missing+=("scrcpy>=2.0")
+        fi
     fi
-    
-    if [ "$scrcpy_found" = false ]; then
-        missing+=("scrcpy")
-    fi
-    
+
     if [ ${#missing[@]} -gt 0 ]; then
         echo -e "${RED}Error:${NC} Missing dependencies: ${missing[*]}"
         echo "Please install them first."
