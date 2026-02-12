@@ -2,9 +2,11 @@ name: APT Repo (Pages)
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v1.0.2)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -25,6 +27,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Checkout tag
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          git checkout "${{ inputs.tag }}"
+
       - name: Install APT tooling
         run: sudo apt-get update && sudo apt-get install -y dpkg-dev apt-utils gnupg
 
@@ -32,7 +40,7 @@ jobs:
         run: ./scripts/build-installer.sh
 
       - name: Build Debian package
-        run: ./scripts/build-deb.sh "${GITHUB_REF_NAME:-v0.0.0}"
+        run: ./scripts/build-deb.sh "${{ inputs.tag }}"
 
       - name: Build APT repository
         run: |

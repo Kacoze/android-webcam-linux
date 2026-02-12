@@ -105,6 +105,8 @@ If GitHub Pages APT repository is enabled for this repo, you can install via APT
 
 Maintainers: set repository variable `APT_PAGES_ENABLED=1` to publish the APT repo on tag pushes.
 
+Maintainers (recommended): run the `APT Repo (Pages)` workflow manually on `main` and pass the desired tag (GitHub Pages deployments from tags may be blocked by environment rules).
+
 Signed repo (recommended):
 
 ```bash
