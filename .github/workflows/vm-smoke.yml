@@ -1,0 +1,25 @@
+name: VM Smoke (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Optional run notes"
+        required: false
+        type: string
+
+jobs:
+  preflight-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run VM smoke preflight script
+        run: ./scripts/vm-smoke-test.sh | tee vm-smoke.log
+
+      - name: Upload smoke output
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-smoke-log
+          path: vm-smoke.log

@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  shell-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bash syntax check
+        run: bash -n install.sh bootstrap.sh scripts/*.sh
+
+      - name: Verify installer checksum file
+        run: ./scripts/verify-install-checksum.sh
+
+      - name: Installer help smoke test
+        run: bash install.sh --help

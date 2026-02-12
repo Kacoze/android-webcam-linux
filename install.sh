@@ -4,6 +4,16 @@
 # Note: Some commands intentionally return non-zero (e.g., grep -q), so || true is used where needed
 set -euo pipefail
 
+# Pre-parse arguments needed before TTY handling
+AUTO_YES=false
+WANTS_HELP=false
+for arg in "$@"; do
+    case "$arg" in
+        --yes|-y) AUTO_YES=true ;;
+        --help|-h) WANTS_HELP=true ;;
+    esac
+done
+
 # =============================================================================
 # 📸 Android Webcam Setup for Linux (Universal)
 # =============================================================================
@@ -21,27 +31,59 @@ readonly NC='\033[0m' # No Color
 
 # --- TTY: safe prompts when run from pipe (e.g. wget -O - ... | bash) ---
 PROMPT_FD=0
-if [ ! -t 0 ]; then
-    if [ ! -e /dev/tty ] || [ ! -r /dev/tty ]; then
-        echo -e "${RED}[ERROR]${NC} Running from a pipe without a TTY. Interactive prompts are required."
-        echo "Please download the script and run it locally:"
-        echo "  wget https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh"
-        echo "  bash install.sh"
-        exit 1
+if [ "$WANTS_HELP" != true ] && [ ! -t 0 ]; then
+    if [ "$AUTO_YES" = true ]; then
+        echo -e "${YELLOW}[WARN]${NC} No TTY detected. Running in non-interactive mode (--yes)."
+    else
+        if [ ! -e /dev/tty ] || [ ! -r /dev/tty ]; then
+            echo -e "${RED}[ERROR]${NC} Running from a pipe without a TTY. Interactive prompts are required."
+            echo "Please run via bootstrap one-liner (recommended):"
+            echo "  wget -qO - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash"
+            echo ""
+            echo "Or download installer and run it locally:"
+            echo "  wget https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh"
+            echo "  bash install.sh"
+            echo ""
+            echo "Or run non-interactive mode (auto-yes):"
+            echo "  ... | bash -s -- --yes"
+            exit 1
+        fi
+        exec 3</dev/tty 2>/dev/null || {
+            echo -e "${RED}[ERROR]${NC} Cannot open /dev/tty. Interactive prompts are required."
+            echo "Please run via bootstrap one-liner (recommended):"
+            echo "  wget -qO - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash"
+            echo ""
+            echo "Or download installer and run it locally:"
+            echo "  wget https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh"
+            echo "  bash install.sh"
+            echo ""
+            echo "Or run non-interactive mode (auto-yes):"
+            echo "  ... | bash -s -- --yes"
+            exit 1
+        }
+        PROMPT_FD=3
+        echo -e "${YELLOW}[WARN]${NC} Installation run from pipe; prompts will be read from terminal (/dev/tty)."
     fi
-    exec 3</dev/tty 2>/dev/null || {
-        echo -e "${RED}[ERROR]${NC} Cannot open /dev/tty. Interactive prompts are required."
-        echo "Please download the script and run it locally:"
-        echo "  wget https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh"
-        echo "  bash install.sh"
-        exit 1
-    }
-    PROMPT_FD=3
-    echo -e "${YELLOW}[WARN]${NC} Installation run from pipe; prompts will be read from terminal (/dev/tty)."
 fi
 
-prompt_read() { read -u "${PROMPT_FD}" -r -p "$1" "$2"; }
-prompt_pause() { read -u "${PROMPT_FD}" -r -p "$1"; }
+prompt_read() {
+    local prompt="$1"
+    local out_var="$2"
+    if [ "$AUTO_YES" = true ]; then
+        printf -v "$out_var" "y"
+        return 0
+    fi
+    read -u "${PROMPT_FD}" -r -p "$prompt" "$out_var"
+}
+
+prompt_pause() {
+    local prompt="$1"
+    if [ "$AUTO_YES" = true ]; then
+        log_info "Auto mode: skipping prompt: $prompt"
+        return 0
+    fi
+    read -u "${PROMPT_FD}" -r -p "$prompt"
+}
 
 # --- HELPER FUNCTIONS ---
 
@@ -217,17 +259,34 @@ uninstall() {
 }
 
 # --- ARGUMENT PARSING ---
-case "${1:-}" in
-    --uninstall|-u) uninstall ;;
-    --help|-h) 
-        print_banner
-        echo "Usage: ./install.sh [OPTIONS]"
-        echo "Options:"
-        echo "  --uninstall, -u   Remove the tool and cleanup"
-        echo "  --help, -h        Show this help"
-        exit 0
-        ;;
-esac
+DO_UNINSTALL=false
+SHOW_HELP=false
+for arg in "$@"; do
+    case "$arg" in
+        --uninstall|-u) DO_UNINSTALL=true ;;
+        --help|-h) SHOW_HELP=true ;;
+        --yes|-y) ;;
+        *)
+            echo -e "${RED}[ERROR]${NC} Unknown option: $arg"
+            echo "Use --help to see available options."
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$SHOW_HELP" = true ]; then
+    print_banner
+    echo "Usage: ./install.sh [OPTIONS]"
+    echo "Options:"
+    echo "  --uninstall, -u   Remove the tool and cleanup"
+    echo "  --yes, -y         Non-interactive mode (auto-confirm prompts)"
+    echo "  --help, -h        Show this help"
+    exit 0
+fi
+
+if [ "$DO_UNINSTALL" = true ]; then
+    uninstall
+fi
 
 # =============================================================================
 # MAIN INSTALLATION LOGIC

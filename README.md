@@ -66,16 +66,38 @@ Open a terminal (Ctrl+Alt+T) and paste one of the following commands:
 
 **Using wget:**
 ```bash
-wget -qO - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | bash
+wget -qO - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 (The `-q` flag keeps wget quiet so its progress bar does not mix with the installer output.)
 
 **Or using curl (if wget is not available):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 
-The installer is interactive. When run via pipe (`wget … | bash`), it reads prompts from your terminal (`/dev/tty`). If prompts do not appear or installation fails, download the script and run it locally: `wget …/install.sh` then `bash install.sh`.
+The bootstrap script resolves a release ref, downloads `install.sh`, verifies `install.sh.sha256`, and then runs the installer.
+
+The installer is interactive by default. For non-interactive environments, use `--yes`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash -s -- --yes
+```
+
+To pin a specific version/ref (recommended for reproducible installs):
+
+```bash
+ANDROID_WEBCAM_REF="v2.2.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
+```
+
+### Maintainer note (checksum)
+
+When `install.sh` changes, regenerate checksum before publishing:
+
+```bash
+./scripts/update-install-checksum.sh
+```
+
+CI verifies `install.sh.sha256` and fails if it is out of date.
 
 > **Note:** After installation, pair your phone by running `android-webcam-ctl setup` or using the **Setup (fix)** icon in the app menu. Connect the USB cable when prompted, then disconnect. You can also start the camera without prior setup – if IP is not set, setup will run automatically.
 
@@ -446,12 +468,10 @@ android-webcam-ctl uninstall
 **If you installed via one-liner (`wget ... | bash` or `curl ... | bash`):**
 ```bash
 # Using wget:
-wget -O /tmp/install.sh https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh
-bash /tmp/install.sh --uninstall
+wget -qO - https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash -s -- --uninstall
 
 # Or using curl:
-curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/install.sh -o /tmp/install.sh
-bash /tmp/install.sh --uninstall
+curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash -s -- --uninstall
 ```
 
 **Alternatively, you can manually delete the files:**
