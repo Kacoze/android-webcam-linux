@@ -6,28 +6,26 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
-## [2.5.2] - 2026-02-12
+## [1.0.0] - 2026-02-12
 
-- Enabled minisign signing in release pipeline (install.sh signatures published for tagged releases).
+- First stable release (renumbered).
 
-## [2.5.1] - 2026-02-12
+## Legacy (pre-1.0.0)
 
-- Fix release workflow to publish even when optional signatures are not configured.
+This section reflects earlier internal versioning that has been removed from GitHub Releases/tags.
 
-## [2.5.0] - 2026-02-12
+### 2.5.x
 
-- Added runtime `version` command and improved release upgrade detection.
-- Release notes are generated from git history for tagged releases.
-- Bootstrap supports optional minisign verification and stable-only tightening.
-- Added Debian package checksum and AUR PKGBUILD template.
+- Minisign signing support in release pipeline.
+- Release notes generated from git history.
+- Debian package artifacts and checksums.
 
-## [2.4.0] - 2026-02-12
+### 2.4.0
 
-- One-liner installation hardening (bootstrap + checksum).
-- Added non-interactive installer mode and preflight checks.
-- Added `doctor` diagnostics, JSON output, and better runtime logging.
+- One-liner hardening (bootstrap + checksum).
+- Installer `--yes` and `--check-only`.
+- `doctor` diagnostics and runtime logging improvements.
 
-## [2.3.0] - 2026-02-12
+### 2.3.0
 
-- Introduced release-based bootstrap flow and checksum validation.
-- Added CI checks for script syntax and checksum integrity.
+- Release-based bootstrap flow and checksum validation.

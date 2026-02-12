@@ -24,7 +24,7 @@ done
 # =============================================================================
 
 # --- CONSTANTS & COLORS ---
-readonly SCRIPT_VERSION="2.5.2"
+readonly SCRIPT_VERSION="1.0.0"
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
 readonly RED='\033[0;31m'
