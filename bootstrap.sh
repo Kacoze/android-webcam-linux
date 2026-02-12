@@ -4,6 +4,7 @@ set -euo pipefail
 REPO="${ANDROID_WEBCAM_REPO:-Kacoze/android-webcam-linux}"
 REF="${ANDROID_WEBCAM_REF:-}"
 ALLOW_UNVERIFIED="${ANDROID_WEBCAM_ALLOW_UNVERIFIED:-0}"
+LOCAL_MODE="${ANDROID_WEBCAM_LOCAL:-0}"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -78,6 +79,35 @@ verify_checksum() {
         return 1
     fi
 }
+
+run_local_mode() {
+    local script_dir
+    script_dir="$(cd "$(dirname "$0")" && pwd)"
+    local install_file="$script_dir/install.sh"
+    local checksum_file="$script_dir/install.sh.sha256"
+
+    if [ ! -f "$install_file" ]; then
+        echo "Error: local install.sh not found in $script_dir" >&2
+        exit 1
+    fi
+
+    if [ -f "$checksum_file" ]; then
+        verify_checksum "$install_file" "$checksum_file"
+        echo "Checksum verified (local mode)."
+    elif [ "$ALLOW_UNVERIFIED" = "1" ]; then
+        echo "Warning: local checksum file missing; continuing (ALLOW_UNVERIFIED=1)." >&2
+    else
+        echo "Error: local checksum file missing: $checksum_file" >&2
+        echo "Set ANDROID_WEBCAM_ALLOW_UNVERIFIED=1 to bypass (not recommended)." >&2
+        exit 1
+    fi
+
+    exec bash "$install_file" "$@"
+}
+
+if [ "$LOCAL_MODE" = "1" ]; then
+    run_local_mode "$@"
+fi
 
 if [ -z "$REF" ]; then
     api_url="https://api.github.com/repos/${REPO}/releases/latest"

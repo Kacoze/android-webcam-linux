@@ -7,10 +7,12 @@ set -euo pipefail
 # Pre-parse arguments needed before TTY handling
 AUTO_YES=false
 WANTS_HELP=false
+CHECK_ONLY=false
 for arg in "$@"; do
     case "$arg" in
         --yes|-y) AUTO_YES=true ;;
         --help|-h) WANTS_HELP=true ;;
+        --check-only) CHECK_ONLY=true ;;
     esac
 done
 
@@ -258,6 +260,48 @@ uninstall() {
     exit 0
 }
 
+run_check_only() {
+    print_banner
+    log_info "Running preflight checks only (--check-only)."
+    local failures=0
+
+    local distro
+    distro=$(detect_distro)
+    if [ "$distro" = "unknown" ]; then
+        log_warn "Could not detect distribution from /etc/os-release."
+    else
+        log_success "Detected distro: $distro"
+    fi
+
+    if command -v sudo >/dev/null 2>&1 || [ "$EUID" -eq 0 ]; then
+        log_success "Privilege escalation tool available (sudo or root)."
+    else
+        log_error "sudo not found and not running as root."
+        failures=$((failures+1))
+    fi
+
+    if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+        log_success "Downloader available (curl or wget)."
+    else
+        log_error "Missing downloader: install curl or wget."
+        failures=$((failures+1))
+    fi
+
+    if command -v bash >/dev/null 2>&1; then
+        log_success "bash is available."
+    else
+        log_error "bash is missing."
+        failures=$((failures+1))
+    fi
+
+    if [ "$failures" -gt 0 ]; then
+        log_error "Preflight checks failed: $failures"
+        return 1
+    fi
+    log_success "Preflight checks passed."
+    return 0
+}
+
 # --- ARGUMENT PARSING ---
 DO_UNINSTALL=false
 SHOW_HELP=false
@@ -266,6 +310,7 @@ for arg in "$@"; do
         --uninstall|-u) DO_UNINSTALL=true ;;
         --help|-h) SHOW_HELP=true ;;
         --yes|-y) ;;
+        --check-only) CHECK_ONLY=true ;;
         *)
             echo -e "${RED}[ERROR]${NC} Unknown option: $arg"
             echo "Use --help to see available options."
@@ -280,12 +325,18 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Options:"
     echo "  --uninstall, -u   Remove the tool and cleanup"
     echo "  --yes, -y         Non-interactive mode (auto-confirm prompts)"
+    echo "  --check-only      Run preflight checks and exit"
     echo "  --help, -h        Show this help"
     exit 0
 fi
 
 if [ "$DO_UNINSTALL" = true ]; then
     uninstall
+fi
+
+if [ "$CHECK_ONLY" = true ]; then
+    run_check_only
+    exit $?
 fi
 
 # =============================================================================
@@ -1908,16 +1959,60 @@ doctor_row() {
     esac
 }
 
+doctor_json_escape() {
+    local s="$1"
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/}
+    s=${s//$'\t'/\\t}
+    printf "%s" "$s"
+}
+
 cmd_doctor() {
+    local json_mode=false
+    case "${1:-}" in
+        --json) json_mode=true ;;
+        "") ;;
+        *)
+            echo "Usage: $0 doctor [--json]"
+            return 1
+            ;;
+    esac
+
     local fails=0
     local warns=0
+    local doctor_items=""
+    local doctor_first=true
 
-    echo -e "--- ${BLUE}Android Camera Doctor${NC} ---"
+    doctor_emit() {
+        local key="$1"
+        local state="$2"
+        local detail="$3"
+        if [ "$json_mode" = true ]; then
+            local esc_key esc_state esc_detail
+            esc_key=$(doctor_json_escape "$key")
+            esc_state=$(doctor_json_escape "$state")
+            esc_detail=$(doctor_json_escape "$detail")
+            if [ "$doctor_first" = true ]; then
+                doctor_first=false
+            else
+                doctor_items+=" ,"
+            fi
+            doctor_items+="\"$esc_key\":{\"status\":\"$esc_state\",\"detail\":\"$esc_detail\"}"
+        else
+            doctor_row "$key" "$state" "$detail"
+        fi
+    }
+
+    if [ "$json_mode" != true ]; then
+        echo -e "--- ${BLUE}Android Camera Doctor${NC} ---"
+    fi
 
     if command -v adb >/dev/null 2>&1; then
-        doctor_row "adb" "OK" "$(command -v adb)"
+        doctor_emit "adb" "OK" "$(command -v adb)"
     else
-        doctor_row "adb" "FAIL" "Install android platform-tools / android-tools-adb"
+        doctor_emit "adb" "FAIL" "Install android platform-tools / android-tools-adb"
         fails=$((fails+1))
     fi
 
@@ -1930,46 +2025,46 @@ cmd_doctor() {
             else
                 scrcpy_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "unknown")
             fi
-            doctor_row "scrcpy>=2.0" "OK" "$scrcpy_bin (version: $scrcpy_ver)"
+            doctor_emit "scrcpy>=2.0" "OK" "$scrcpy_bin (version: $scrcpy_ver)"
         else
-            doctor_row "scrcpy>=2.0" "OK" "$scrcpy_bin (version: $(check_scrcpy_version "$scrcpy_bin"))"
+            doctor_emit "scrcpy>=2.0" "OK" "$scrcpy_bin (version: $(check_scrcpy_version "$scrcpy_bin"))"
         fi
     else
-        doctor_row "scrcpy>=2.0" "FAIL" "Install scrcpy via Snap/Flatpak/package manager"
+        doctor_emit "scrcpy>=2.0" "FAIL" "Install scrcpy via Snap/Flatpak/package manager"
         fails=$((fails+1))
     fi
 
     if [ -c /dev/video10 ]; then
-        doctor_row "/dev/video10" "OK" "virtual camera device present"
+        doctor_emit "/dev/video10" "OK" "virtual camera device present"
     else
-        doctor_row "/dev/video10" "FAIL" "missing virtual camera device"
+        doctor_emit "/dev/video10" "FAIL" "missing virtual camera device"
         fails=$((fails+1))
     fi
 
     if lsmod 2>/dev/null | grep -q '^v4l2loopback'; then
-        doctor_row "v4l2loopback module" "OK" "loaded"
+        doctor_emit "v4l2loopback module" "OK" "loaded"
     else
-        doctor_row "v4l2loopback module" "WARN" "not loaded right now"
+        doctor_emit "v4l2loopback module" "WARN" "not loaded right now"
         warns=$((warns+1))
     fi
 
     if [ -f /etc/modprobe.d/v4l2loopback.conf ]; then
         if grep -q 'video_nr=10' /etc/modprobe.d/v4l2loopback.conf 2>/dev/null; then
-            doctor_row "v4l2loopback config" "OK" "/etc/modprobe.d/v4l2loopback.conf"
+            doctor_emit "v4l2loopback config" "OK" "/etc/modprobe.d/v4l2loopback.conf"
         else
-            doctor_row "v4l2loopback config" "WARN" "config exists but does not contain video_nr=10"
+            doctor_emit "v4l2loopback config" "WARN" "config exists but does not contain video_nr=10"
             warns=$((warns+1))
         fi
     else
-        doctor_row "v4l2loopback config" "WARN" "missing /etc/modprobe.d/v4l2loopback.conf"
+        doctor_emit "v4l2loopback config" "WARN" "missing /etc/modprobe.d/v4l2loopback.conf"
         warns=$((warns+1))
     fi
 
     if command -v groups >/dev/null 2>&1; then
         if groups | grep -q '\bvideo\b' 2>/dev/null; then
-            doctor_row "video group" "OK" "user '$USER' is in video group"
+            doctor_emit "video group" "OK" "user '$USER' is in video group"
         else
-            doctor_row "video group" "WARN" "run: sudo usermod -aG video $USER and re-login"
+            doctor_emit "video group" "WARN" "run: sudo usermod -aG video $USER and re-login"
             warns=$((warns+1))
         fi
     fi
@@ -1978,29 +2073,29 @@ cmd_doctor() {
         local sb_state
         sb_state=$(mokutil --sb-state 2>/dev/null || true)
         if echo "$sb_state" | grep -qi 'enabled'; then
-            doctor_row "Secure Boot" "WARN" "enabled (unsigned v4l2loopback may fail)"
+            doctor_emit "Secure Boot" "WARN" "enabled (unsigned v4l2loopback may fail)"
             warns=$((warns+1))
         elif echo "$sb_state" | grep -qi 'disabled'; then
-            doctor_row "Secure Boot" "OK" "disabled"
+            doctor_emit "Secure Boot" "OK" "disabled"
         else
-            doctor_row "Secure Boot" "INFO" "unknown state"
+            doctor_emit "Secure Boot" "INFO" "unknown state"
         fi
     else
-        doctor_row "Secure Boot" "INFO" "mokutil not installed"
+        doctor_emit "Secure Boot" "INFO" "mokutil not installed"
     fi
 
     if load_config 2>/dev/null; then
         if [ -z "${PHONE_IP:-}" ]; then
-            doctor_row "PHONE_IP" "WARN" "not set (run: android-webcam-ctl setup)"
+            doctor_emit "PHONE_IP" "WARN" "not set (run: android-webcam-ctl setup)"
             warns=$((warns+1))
         elif validate_ip "$PHONE_IP"; then
-            doctor_row "PHONE_IP" "OK" "$PHONE_IP"
+            doctor_emit "PHONE_IP" "OK" "$PHONE_IP"
         else
-            doctor_row "PHONE_IP" "WARN" "invalid format in config: $PHONE_IP"
+            doctor_emit "PHONE_IP" "WARN" "invalid format in config: $PHONE_IP"
             warns=$((warns+1))
         fi
     else
-        doctor_row "Config" "WARN" "could not load $CONFIG_FILE"
+        doctor_emit "Config" "WARN" "could not load $CONFIG_FILE"
         warns=$((warns+1))
     fi
 
@@ -2009,28 +2104,42 @@ cmd_doctor() {
         online_count=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' || echo "0")
         online_count=$(echo "$online_count" | tr -d '[:space:]')
         if [[ "$online_count" =~ ^[0-9]+$ ]] && [ "$online_count" -gt 0 ] 2>/dev/null; then
-            doctor_row "adb devices" "OK" "$online_count device(s) in 'device' state"
+            doctor_emit "adb devices" "OK" "$online_count device(s) in 'device' state"
         else
-            doctor_row "adb devices" "WARN" "no authorized device connected now"
+            doctor_emit "adb devices" "WARN" "no authorized device connected now"
             warns=$((warns+1))
         fi
     fi
 
-    echo ""
-    echo -e "Doctor result: ${RED}${fails} fail${NC}, ${YELLOW}${warns} warning${NC}"
+    local exit_code=0
+    local result="ok"
     if [ "$fails" -gt 0 ]; then
-        echo "Suggested quick fixes:"
-        echo "- Re-run installer: curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash"
-        echo "- Pair phone again: android-webcam-ctl setup"
-        echo "- If /dev/video10 missing: sudo modprobe v4l2loopback"
-        return 1
+        exit_code=1
+        result="fail"
+    elif [ "$warns" -gt 0 ]; then
+        exit_code=2
+        result="warn"
     fi
-    if [ "$warns" -gt 0 ]; then
-        echo "Warnings detected. Camera may still work, but reliability can be reduced."
+
+    if [ "$json_mode" = true ]; then
+        printf '{"result":"%s","fails":%s,"warnings":%s,"checks":{%s}}\n' "$result" "$fails" "$warns" "$doctor_items"
     else
-        echo -e "${GREEN}All key checks passed.${NC}"
+        echo ""
+        echo -e "Doctor result: ${RED}${fails} fail${NC}, ${YELLOW}${warns} warning${NC}"
+        if [ "$fails" -gt 0 ]; then
+            echo "Suggested quick fixes:"
+            echo "- Re-run installer: curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash"
+            echo "- Pair phone again: android-webcam-ctl setup"
+            echo "- If /dev/video10 missing: sudo modprobe v4l2loopback"
+        elif [ "$warns" -gt 0 ]; then
+            echo "Warnings detected. Camera may still work, but reliability can be reduced."
+        else
+            echo -e "${GREEN}All key checks passed.${NC}"
+        fi
+        echo "Exit codes: 0=OK, 1=FAIL, 2=WARN"
     fi
-    return 0
+
+    return "$exit_code"
 }
 
 cmd_config() {
@@ -2126,11 +2235,12 @@ case "$1" in
     setup)   cmd_fix ;;
     fix)     cmd_fix ;;  # backward compatibility
     status)  cmd_status ;;
-    doctor)  cmd_doctor ;;
+    doctor)  cmd_doctor "${2:-}" ;;
     config)  cmd_config ;;
     uninstall) cmd_uninstall ;;
     *)
         echo "Usage: $0 {start|stop|toggle|setup|status|doctor|config|uninstall}"
+        echo "       $0 doctor [--json]"
         exit 1
         ;;
 esac

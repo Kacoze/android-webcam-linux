@@ -89,6 +89,13 @@ To pin a specific version/ref (recommended for reproducible installs):
 ANDROID_WEBCAM_REF="v2.2.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 
+### One-liner security model
+
+- `bootstrap.sh` downloads `install.sh` and `install.sh.sha256` from the selected ref.
+- By default it verifies checksum before running installer.
+- If release lookup fails, bootstrap falls back to `main`.
+- `ANDROID_WEBCAM_ALLOW_UNVERIFIED=1` bypasses checksum only as an emergency fallback (not recommended).
+
 ### Maintainer note (checksum)
 
 When `install.sh` changes, regenerate checksum before publishing:
@@ -98,6 +105,12 @@ When `install.sh` changes, regenerate checksum before publishing:
 ```
 
 CI verifies `install.sh.sha256` and fails if it is out of date.
+
+For CI/smoke tests without full system installation, use:
+
+```bash
+bash install.sh --yes --check-only
+```
 
 > **Note:** After installation, pair your phone by running `android-webcam-ctl setup` or using the **Setup (fix)** icon in the app menu. Connect the USB cable when prompted, then disconnect. You can also start the camera without prior setup – if IP is not set, setup will run automatically.
 
@@ -355,6 +368,8 @@ After installation, the tool works completely offline. It only needs:
 
 ## 🔧 Troubleshooting
 
+Maintainer support checklist: [`SUPPORT.md`](SUPPORT.md)
+
 ### Quick diagnostics (recommended first)
 
 Run:
@@ -364,6 +379,14 @@ android-webcam-ctl doctor
 ```
 
 This command checks the most common blockers (`adb`, `scrcpy >= 2.0`, `/dev/video10`, `v4l2loopback`, Secure Boot hints, config/IP format) and prints quick fix suggestions.
+
+Use machine-readable output:
+
+```bash
+android-webcam-ctl doctor --json
+```
+
+Doctor exit codes: `0=OK`, `1=FAIL`, `2=WARN`.
 
 ### Common Issues
 

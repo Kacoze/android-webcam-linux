@@ -21,3 +21,6 @@ jobs:
 
       - name: Installer help smoke test
         run: bash install.sh --help
+
+      - name: One-liner preflight smoke test
+        run: ANDROID_WEBCAM_LOCAL=1 bash bootstrap.sh --yes --check-only
