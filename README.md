@@ -86,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bo
 To pin a specific version/ref (recommended for reproducible installs):
 
 ```bash
-ANDROID_WEBCAM_REF="v2.2.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
+ANDROID_WEBCAM_REF="v2.4.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 
 ### One-liner security model
