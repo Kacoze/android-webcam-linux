@@ -355,6 +355,16 @@ After installation, the tool works completely offline. It only needs:
 
 ## 🔧 Troubleshooting
 
+### Quick diagnostics (recommended first)
+
+Run:
+
+```bash
+android-webcam-ctl doctor
+```
+
+This command checks the most common blockers (`adb`, `scrcpy >= 2.0`, `/dev/video10`, `v4l2loopback`, Secure Boot hints, config/IP format) and prints quick fix suggestions.
+
 ### Common Issues
 
 #### Camera not detected in Meet/Zoom after turning camera off and on again

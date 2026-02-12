@@ -1885,6 +1885,154 @@ cmd_status() {
     fi
 }
 
+doctor_row() {
+    local label="$1"
+    local state="$2"
+    local detail="$3"
+    case "$state" in
+        OK)
+            echo -e "${label}: ${GREEN}OK${NC}${detail:+ - $detail}"
+            ;;
+        WARN)
+            echo -e "${label}: ${YELLOW}WARN${NC}${detail:+ - $detail}"
+            ;;
+        FAIL)
+            echo -e "${label}: ${RED}FAIL${NC}${detail:+ - $detail}"
+            ;;
+        INFO)
+            echo -e "${label}: ${BLUE}INFO${NC}${detail:+ - $detail}"
+            ;;
+        *)
+            echo "${label}: ${state}${detail:+ - $detail}"
+            ;;
+    esac
+}
+
+cmd_doctor() {
+    local fails=0
+    local warns=0
+
+    echo -e "--- ${BLUE}Android Camera Doctor${NC} ---"
+
+    if command -v adb >/dev/null 2>&1; then
+        doctor_row "adb" "OK" "$(command -v adb)"
+    else
+        doctor_row "adb" "FAIL" "Install android platform-tools / android-tools-adb"
+        fails=$((fails+1))
+    fi
+
+    local scrcpy_bin=""
+    if scrcpy_bin=$(find_scrcpy 2>/dev/null); then
+        if [[ "$scrcpy_bin" == "flatpak run "* ]]; then
+            local scrcpy_ver="unknown"
+            if command -v head >/dev/null 2>&1; then
+                scrcpy_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | head -n 1 || echo "unknown")
+            else
+                scrcpy_ver=$(flatpak run org.scrcpy.ScrCpy --version 2>/dev/null | sed -n 's/.*scrcpy[[:space:]]*\([0-9]\+\.[0-9]\+\(.[0-9]\+\)\?\).*/\1/p' | sed -n '1p' || echo "unknown")
+            fi
+            doctor_row "scrcpy>=2.0" "OK" "$scrcpy_bin (version: $scrcpy_ver)"
+        else
+            doctor_row "scrcpy>=2.0" "OK" "$scrcpy_bin (version: $(check_scrcpy_version "$scrcpy_bin"))"
+        fi
+    else
+        doctor_row "scrcpy>=2.0" "FAIL" "Install scrcpy via Snap/Flatpak/package manager"
+        fails=$((fails+1))
+    fi
+
+    if [ -c /dev/video10 ]; then
+        doctor_row "/dev/video10" "OK" "virtual camera device present"
+    else
+        doctor_row "/dev/video10" "FAIL" "missing virtual camera device"
+        fails=$((fails+1))
+    fi
+
+    if lsmod 2>/dev/null | grep -q '^v4l2loopback'; then
+        doctor_row "v4l2loopback module" "OK" "loaded"
+    else
+        doctor_row "v4l2loopback module" "WARN" "not loaded right now"
+        warns=$((warns+1))
+    fi
+
+    if [ -f /etc/modprobe.d/v4l2loopback.conf ]; then
+        if grep -q 'video_nr=10' /etc/modprobe.d/v4l2loopback.conf 2>/dev/null; then
+            doctor_row "v4l2loopback config" "OK" "/etc/modprobe.d/v4l2loopback.conf"
+        else
+            doctor_row "v4l2loopback config" "WARN" "config exists but does not contain video_nr=10"
+            warns=$((warns+1))
+        fi
+    else
+        doctor_row "v4l2loopback config" "WARN" "missing /etc/modprobe.d/v4l2loopback.conf"
+        warns=$((warns+1))
+    fi
+
+    if command -v groups >/dev/null 2>&1; then
+        if groups | grep -q '\bvideo\b' 2>/dev/null; then
+            doctor_row "video group" "OK" "user '$USER' is in video group"
+        else
+            doctor_row "video group" "WARN" "run: sudo usermod -aG video $USER and re-login"
+            warns=$((warns+1))
+        fi
+    fi
+
+    if command -v mokutil >/dev/null 2>&1; then
+        local sb_state
+        sb_state=$(mokutil --sb-state 2>/dev/null || true)
+        if echo "$sb_state" | grep -qi 'enabled'; then
+            doctor_row "Secure Boot" "WARN" "enabled (unsigned v4l2loopback may fail)"
+            warns=$((warns+1))
+        elif echo "$sb_state" | grep -qi 'disabled'; then
+            doctor_row "Secure Boot" "OK" "disabled"
+        else
+            doctor_row "Secure Boot" "INFO" "unknown state"
+        fi
+    else
+        doctor_row "Secure Boot" "INFO" "mokutil not installed"
+    fi
+
+    if load_config 2>/dev/null; then
+        if [ -z "${PHONE_IP:-}" ]; then
+            doctor_row "PHONE_IP" "WARN" "not set (run: android-webcam-ctl setup)"
+            warns=$((warns+1))
+        elif validate_ip "$PHONE_IP"; then
+            doctor_row "PHONE_IP" "OK" "$PHONE_IP"
+        else
+            doctor_row "PHONE_IP" "WARN" "invalid format in config: $PHONE_IP"
+            warns=$((warns+1))
+        fi
+    else
+        doctor_row "Config" "WARN" "could not load $CONFIG_FILE"
+        warns=$((warns+1))
+    fi
+
+    if command -v adb >/dev/null 2>&1; then
+        local online_count
+        online_count=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' || echo "0")
+        online_count=$(echo "$online_count" | tr -d '[:space:]')
+        if [[ "$online_count" =~ ^[0-9]+$ ]] && [ "$online_count" -gt 0 ] 2>/dev/null; then
+            doctor_row "adb devices" "OK" "$online_count device(s) in 'device' state"
+        else
+            doctor_row "adb devices" "WARN" "no authorized device connected now"
+            warns=$((warns+1))
+        fi
+    fi
+
+    echo ""
+    echo -e "Doctor result: ${RED}${fails} fail${NC}, ${YELLOW}${warns} warning${NC}"
+    if [ "$fails" -gt 0 ]; then
+        echo "Suggested quick fixes:"
+        echo "- Re-run installer: curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash"
+        echo "- Pair phone again: android-webcam-ctl setup"
+        echo "- If /dev/video10 missing: sudo modprobe v4l2loopback"
+        return 1
+    fi
+    if [ "$warns" -gt 0 ]; then
+        echo "Warnings detected. Camera may still work, but reliability can be reduced."
+    else
+        echo -e "${GREEN}All key checks passed.${NC}"
+    fi
+    return 0
+}
+
 cmd_config() {
     if ! load_config; then
         return 1
@@ -1978,10 +2126,11 @@ case "$1" in
     setup)   cmd_fix ;;
     fix)     cmd_fix ;;  # backward compatibility
     status)  cmd_status ;;
+    doctor)  cmd_doctor ;;
     config)  cmd_config ;;
     uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|setup|status|config|uninstall}"
+        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|config|uninstall}"
         exit 1
         ;;
 esac
@@ -2072,6 +2221,7 @@ echo "What's next:"
 echo "1. To pair your phone and set IP: run 'android-webcam-ctl setup' or use the 'Setup (fix)' icon in the app menu. Connect USB when prompted, then disconnect."
 echo "2. Use the 'Camera Phone' icon to toggle the webcam."
 echo "3. Run 'android-webcam-ctl config' to change settings."
+echo "4. If something fails, run 'android-webcam-ctl doctor' for diagnostics."
 echo ""
 echo -e "${YELLOW}Did I save you some time? A virtual coffee is a great way to say thanks!${NC}"
 echo -e "${BLUE}☕ https://buycoffee.to/kacoze ${NC}"

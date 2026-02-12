@@ -1,0 +1,51 @@
+name: One-liner Matrix
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  ubuntu-host:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y curl wget ca-certificates bash
+
+      - name: One-liner help smoke
+        run: curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash -s -- --help
+
+  container-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: debian
+            image: debian:bookworm-slim
+            prep: apt-get update && apt-get install -y curl wget ca-certificates bash
+          - name: fedora
+            image: fedora:41
+            prep: dnf install -y curl wget ca-certificates bash
+          - name: arch
+            image: archlinux:latest
+            prep: pacman -Sy --noconfirm curl wget ca-certificates bash
+          - name: opensuse
+            image: opensuse/leap:15.6
+            prep: zypper --non-interactive refresh && zypper --non-interactive install curl wget ca-certificates bash
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare tools
+        shell: bash
+        run: ${{ matrix.prep }}
+
+      - name: Bootstrap help smoke
+        shell: bash
+        run: ANDROID_WEBCAM_ALLOW_UNVERIFIED=1 ANDROID_WEBCAM_REF=main bash bootstrap.sh --help
