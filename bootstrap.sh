@@ -5,6 +5,7 @@ REPO="${ANDROID_WEBCAM_REPO:-Kacoze/android-webcam-linux}"
 REF="${ANDROID_WEBCAM_REF:-}"
 ALLOW_UNVERIFIED="${ANDROID_WEBCAM_ALLOW_UNVERIFIED:-0}"
 LOCAL_MODE="${ANDROID_WEBCAM_LOCAL:-0}"
+STABLE_ONLY="${ANDROID_WEBCAM_STABLE_ONLY:-0}"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -36,6 +37,17 @@ download_file() {
 extract_latest_release_tag() {
     local json="$1"
     printf "%s" "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]\+\)".*/\1/p' | sed -n '1p'
+}
+
+download_from_release_assets() {
+    local repo="$1"
+    local ref="$2"
+    local out_install="$3"
+    local out_checksum="$4"
+
+    local base="https://github.com/${repo}/releases/download/${ref}"
+    download_file "$base/install.sh" "$out_install"
+    download_file "$base/install.sh.sha256" "$out_checksum"
 }
 
 sha256_cmd() {
@@ -114,6 +126,10 @@ if [ -z "$REF" ]; then
     latest_json="$(fetch_text "$api_url" || true)"
     REF="$(extract_latest_release_tag "$latest_json")"
     if [ -z "$REF" ]; then
+        if [ "$STABLE_ONLY" = "1" ]; then
+            echo "Error: failed to resolve latest release (STABLE_ONLY=1)." >&2
+            exit 1
+        fi
         echo "Warning: failed to resolve latest release; falling back to main." >&2
         REF="main"
     fi
@@ -127,9 +143,28 @@ install_file="$tmp_dir/install.sh"
 checksum_file="$tmp_dir/install.sh.sha256"
 
 echo "Downloading installer from ${REPO}@${REF}..."
-download_file "$raw_base/install.sh" "$install_file"
 
-if download_file "$raw_base/install.sh.sha256" "$checksum_file" 2>/dev/null; then
+download_ok=false
+if [[ "$REF" == v* ]]; then
+    if download_from_release_assets "$REPO" "$REF" "$install_file" "$checksum_file" 2>/dev/null; then
+        download_ok=true
+    fi
+fi
+
+if [ "$download_ok" = false ]; then
+    if [ "$STABLE_ONLY" = "1" ]; then
+        echo "Error: release assets not available for ref '${REF}' (STABLE_ONLY=1)." >&2
+        exit 1
+    fi
+    download_file "$raw_base/install.sh" "$install_file"
+    if download_file "$raw_base/install.sh.sha256" "$checksum_file" 2>/dev/null; then
+        :
+    else
+        checksum_file=""
+    fi
+fi
+
+if [ -n "${checksum_file:-}" ] && [ -f "${checksum_file:-}" ]; then
     verify_checksum "$install_file" "$checksum_file"
     echo "Checksum verified."
 else

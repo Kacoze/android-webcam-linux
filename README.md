@@ -89,11 +89,20 @@ To pin a specific version/ref (recommended for reproducible installs):
 ANDROID_WEBCAM_REF="v2.4.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 
+### Installation (Debian/Ubuntu .deb)
+
+If you prefer a package install, download the latest `.deb` from GitHub Releases and install it:
+
+```bash
+sudo dpkg -i android-webcam-linux_*.deb
+```
+
 ### One-liner security model
 
 - `bootstrap.sh` downloads `install.sh` and `install.sh.sha256` from the selected ref.
 - By default it verifies checksum before running installer.
 - If release lookup fails, bootstrap falls back to `main`.
+- `ANDROID_WEBCAM_STABLE_ONLY=1` disables fallback to `main` (fail if no release/assets).
 - `ANDROID_WEBCAM_ALLOW_UNVERIFIED=1` bypasses checksum only as an emergency fallback (not recommended).
 
 ### Maintainer note (checksum)
@@ -101,6 +110,7 @@ ANDROID_WEBCAM_REF="v2.4.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/
 When `install.sh` changes, regenerate checksum before publishing:
 
 ```bash
+./scripts/build-installer.sh
 ./scripts/update-install-checksum.sh
 ```
 
@@ -136,6 +146,13 @@ When you want to join a call:
 *   Open Zoom/Teams/Discord and select the camera: **Android Cam** (appears as `/dev/video10`).
 
 **To turn off:** Click the **📷 Camera Phone** icon again, or right-click the icon → **Stop Camera**, or use the notification action.
+
+Useful commands:
+
+```bash
+android-webcam-ctl start --dry-run
+android-webcam-ctl logs
+```
 
 ### 2. Application Examples
 

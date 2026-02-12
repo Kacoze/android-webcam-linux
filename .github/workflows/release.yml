@@ -15,6 +15,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build installer from src
+        run: ./scripts/build-installer.sh
+
+      - name: Update installer checksum
+        run: ./scripts/update-install-checksum.sh
+
       - name: Bash syntax check
         run: bash -n install.sh bootstrap.sh scripts/*.sh
 
@@ -23,6 +29,9 @@ jobs:
 
       - name: One-liner preflight smoke test
         run: ANDROID_WEBCAM_LOCAL=1 bash bootstrap.sh --yes --check-only
+
+      - name: Build Debian package (Ubuntu/Debian)
+        run: ./scripts/build-deb.sh "${GITHUB_REF_NAME}"
 
       - name: Generate release notes
         id: notes
@@ -49,3 +58,7 @@ jobs:
         with:
           generate_release_notes: true
           body: ${{ steps.notes.outputs.body }}
+          files: |
+            install.sh
+            install.sh.sha256
+            dist/*.deb
