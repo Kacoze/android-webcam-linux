@@ -10,5 +10,8 @@ if ! command -v sha256sum >/dev/null 2>&1; then
 fi
 
 cd "$REPO_ROOT"
+if [ -f "$REPO_ROOT/scripts/build-installer.sh" ] && [ -d "$REPO_ROOT/src" ]; then
+    "$REPO_ROOT/scripts/build-installer.sh" >/dev/null
+fi
 sha256sum install.sh > install.sh.sha256
 echo "Updated install.sh.sha256"

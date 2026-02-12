@@ -1,0 +1,49 @@
+#!/bin/bash
+# android-webcam-run-in-terminal - run android-webcam-ctl status/config/setup in a terminal (for desktop actions)
+
+set -e
+CTL="/usr/local/bin/android-webcam-ctl"
+case "${1:-}" in
+    status)  CMD="$CTL status; read -r -p \"Press Enter to close...\"; exec bash" ;;
+    config)  CMD="$CTL config" ;;
+    setup)   CMD="$CTL setup" ;;
+    logs)    CMD="$CTL logs; read -r -p \"Press Enter to close...\"; exec bash" ;;
+    *)       echo "Usage: $0 {status|config|setup|logs}" >&2; exit 1 ;;
+esac
+
+run_in_term() {
+    local cmd="$1"
+    export AWRT_CMD="$cmd"
+    if command -v xdg-terminal-exec >/dev/null 2>&1; then
+        xdg-terminal-exec bash -c "$cmd"
+        return $?
+    fi
+    if command -v x-terminal-emulator >/dev/null 2>&1; then
+        x-terminal-emulator -e bash -c "$cmd"
+        return $?
+    fi
+    if command -v gnome-terminal >/dev/null 2>&1; then
+        gnome-terminal -- bash -c "$cmd"
+        return $?
+    fi
+    if command -v konsole >/dev/null 2>&1; then
+        konsole -e bash -c "$cmd"
+        return $?
+    fi
+    if command -v xfce4-terminal >/dev/null 2>&1; then
+        xfce4-terminal -e 'bash -c "$AWRT_CMD"'
+        return $?
+    fi
+    if command -v mate-terminal >/dev/null 2>&1; then
+        mate-terminal -e 'bash -c "$AWRT_CMD"'
+        return $?
+    fi
+    if command -v xterm >/dev/null 2>&1; then
+        xterm -e bash -c "$cmd"
+        return $?
+    fi
+    echo "No terminal emulator found. Install one of: gnome-terminal, konsole, xfce4-terminal, xterm." >&2
+    return 1
+}
+
+run_in_term "$CMD"

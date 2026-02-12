@@ -2,13 +2,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RUNTIME_DIR="$REPO_ROOT/.ci/runtime"
+RUNTIME_DIR="$REPO_ROOT/src"
 MOCKS_DIR="$REPO_ROOT/.ci/mocks"
 
-rm -rf "$RUNTIME_DIR" "$MOCKS_DIR"
-mkdir -p "$RUNTIME_DIR" "$MOCKS_DIR"
-
-"$REPO_ROOT/scripts/extract-runtime-scripts.sh" "$RUNTIME_DIR"
+rm -rf "$MOCKS_DIR"
+mkdir -p "$MOCKS_DIR"
 
 # Create mock commands
 cat > "$MOCKS_DIR/adb" <<'EOF'

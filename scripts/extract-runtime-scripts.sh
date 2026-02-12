@@ -26,10 +26,14 @@ extract_block() {
 # android-webcam-common
 extract_block "cat << 'COMMONEOF'" "^COMMONEOF$" "$OUT_DIR/android-webcam-common"
 
+# android-webcam-run-in-terminal
+extract_block "cat << 'RUNTERMEOF'" "^RUNTERMEOF$" "$OUT_DIR/android-webcam-run-in-terminal"
+
 # android-webcam-ctl
 extract_block "cat << 'EOF'" "^EOF$" "$OUT_DIR/android-webcam-ctl"
 
 chmod +x "$OUT_DIR/android-webcam-ctl"
+chmod +x "$OUT_DIR/android-webcam-run-in-terminal"
 chmod 0644 "$OUT_DIR/android-webcam-common"
 
 echo "Extracted runtime scripts to: $OUT_DIR"
