@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-02-12
+
+- Added runtime `version` command and improved release upgrade detection.
+- Release notes are generated from git history for tagged releases.
+- Bootstrap supports optional minisign verification and stable-only tightening.
+- Added Debian package checksum and AUR PKGBUILD template.
+
 ## [2.4.0] - 2026-02-12
 
 - One-liner installation hardening (bootstrap + checksum).
