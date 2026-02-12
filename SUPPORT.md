@@ -16,6 +16,10 @@ android-webcam-ctl doctor --json
 
 Exit codes: `0=OK`, `1=FAIL`, `2=WARN`.
 
+Latest runtime log (after start attempts):
+
+`~/.local/state/android-webcam/logs/latest.log` (legacy: `/tmp/android-cam.log`)
+
 ## 2) Common failures and fixes
 
 ### `/dev/video10` missing

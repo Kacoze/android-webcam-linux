@@ -1008,8 +1008,12 @@ cat << 'EOF' > "$TMP_CTL"
 
 CONFIG_DIR="$HOME/.config/android-webcam"
 CONFIG_FILE="$CONFIG_DIR/settings.conf"
-LOG_FILE="/tmp/android-cam.log"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/android-webcam"
+LOG_DIR="$STATE_DIR/logs"
+LATEST_LOG="$LOG_DIR/latest.log"
+LEGACY_LOG_FILE="/tmp/android-cam.log"
 PID_FILE="$CONFIG_DIR/scrcpy.pid"
+V4L2_SINK="${ANDROID_WEBCAM_V4L2_SINK:-/dev/video10}"
 
 # Default configuration values
 DEFAULT_CAMERA_FACING="back" # front, back, external
@@ -1024,6 +1028,44 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+ts_now() {
+    date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date
+}
+
+log_line() {
+    local level="$1"
+    shift
+    echo -e "[$(ts_now)] ${level}: $*"
+}
+
+ensure_state_dirs() {
+    mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$LOG_DIR" 2>/dev/null || true
+    # Keep legacy log path usable for older docs/scripts
+    ln -sf "$LATEST_LOG" "$LEGACY_LOG_FILE" 2>/dev/null || true
+}
+
+prepare_session_log() {
+    ensure_state_dirs
+    local session
+    session="$LOG_DIR/session-$(date '+%Y%m%d-%H%M%S' 2>/dev/null || date '+%s').log"
+    : > "$session" 2>/dev/null || true
+    ln -sf "$session" "$LATEST_LOG" 2>/dev/null || true
+}
+
+sink_exists() {
+    # Default sink is a V4L2 character device. For tests/CI you can override
+    # ANDROID_WEBCAM_V4L2_SINK to a non-/dev path, then we only require existence.
+    local sink="$1"
+    if [[ "$sink" == /dev/* ]]; then
+        [ -c "$sink" ]
+    else
+        [ -e "$sink" ]
+    fi
+}
+
+# Compatibility: keep LOG_FILE variable pointing to latest session log
+LOG_FILE="$LATEST_LOG"
 
 # Load shared functions (validate_ip, find_scrcpy)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -1187,6 +1229,36 @@ is_running() {
     fi
 }
 
+check_scrcpy_server_payload() {
+    # If scrcpy is installed from GitHub release into ~/.local/bin, a server payload is required.
+    local scrcpy_bin="$1"
+    if [ "$scrcpy_bin" = "$HOME/.local/bin/scrcpy" ]; then
+        if [ -f "$HOME/.local/bin/scrcpy-server" ] || [ -f "$HOME/.local/bin/scrcpy-server.jar" ]; then
+            return 0
+        fi
+        echo -e "${RED}Error:${NC} scrcpy server payload is missing next to $HOME/.local/bin/scrcpy"
+        echo "Fix: reinstall scrcpy via installer, Snap/Flatpak, or ensure scrcpy-server is present."
+        return 1
+    fi
+    return 0
+}
+
+adb_connect_with_retry() {
+    local ip="$1"
+    local tries="${2:-3}"
+    local i=1
+    while [ "$i" -le "$tries" ]; do
+        if adb connect "$ip:5555" > /dev/null 2>&1; then
+            return 0
+        fi
+        # Reset state before retry
+        adb disconnect "$ip:5555" > /dev/null 2>&1 || true
+        sleep "$i"
+        i=$((i+1))
+    done
+    return 1
+}
+
 # --- Commands ---
 
 cmd_start() {
@@ -1227,12 +1299,15 @@ cmd_start() {
         return 1
     fi
 
+    prepare_session_log
     echo -e "${BLUE}Connecting to $PHONE_IP...${NC}"
+    echo -e "${BLUE}Log:${NC} $LOG_FILE (legacy: $LEGACY_LOG_FILE)"
     notify "normal" "Android Camera" "⌛ Connecting..."
 
-    # Connection attempt
-    if ! adb connect "$PHONE_IP:5555" > /dev/null 2>&1; then
+    # Connection attempt (with retry)
+    if ! adb_connect_with_retry "$PHONE_IP" 3; then
         echo -e "${RED}Error:${NC} Failed to connect to $PHONE_IP:5555"
+        echo "Tip: run '$0 setup' to re-pair USB and enable TCP/IP mode again."
         notify "critical" "Android Camera" "Connection failed" "error"
         return 1
     fi
@@ -1241,6 +1316,11 @@ cmd_start() {
     if [ -z "$SCRCPY_BIN" ]; then
         echo -e "${RED}Error:${NC} scrcpy not found!"
         notify "critical" "Android Camera" "Error: scrcpy not found" "error"
+        return 1
+    fi
+
+    if ! check_scrcpy_server_payload "$SCRCPY_BIN"; then
+        notify "critical" "Android Camera" "scrcpy install incomplete (missing server payload)" "error"
         return 1
     fi
 
@@ -1284,8 +1364,14 @@ cmd_start() {
     fi
     
     # Check if video device exists, try to load/reload module if missing
-    if [ ! -c /dev/video10 ]; then
-        echo -e "${YELLOW}Warning:${NC} /dev/video10 not found. Attempting to fix v4l2loopback module..."
+    if ! sink_exists "$V4L2_SINK"; then
+        if [ "$V4L2_SINK" != "/dev/video10" ]; then
+            echo -e "${RED}Error:${NC} V4L2 sink '$V4L2_SINK' not found."
+            echo "Set ANDROID_WEBCAM_V4L2_SINK to an existing device, or use the default /dev/video10."
+            notify "critical" "Android Camera" "Video device not found" "error"
+            return 1
+        fi
+        echo -e "${YELLOW}Warning:${NC} $V4L2_SINK not found. Attempting to fix v4l2loopback module..."
         notify "normal" "Android Camera" "Fixing video module..." "camera-web"
         
         # Check if sudo is available
@@ -1499,7 +1585,7 @@ Or reboot your system." 2>/dev/null || true
         fi
     fi
     
-    CMD+=("--v4l2-sink=/dev/video10")
+    CMD+=("--v4l2-sink=$V4L2_SINK")
     
     # Optional: run without camera window (headless; image only to v4l2)
     local show_window_lower
@@ -1903,6 +1989,8 @@ cmd_status() {
     echo "Camera Facing:  $CAMERA_FACING"
     echo "Video Size:     ${VIDEO_SIZE:-Max}"
     echo "Bitrate:        $BIT_RATE"
+    echo "V4L2 Sink:      $V4L2_SINK"
+    echo "Log:            $LOG_FILE (legacy: $LEGACY_LOG_FILE)"
     
     # Check dependencies
     echo ""
@@ -1984,6 +2072,27 @@ cmd_doctor() {
     local warns=0
     local doctor_items=""
     local doctor_first=true
+    local need_adb=false
+    local need_scrcpy=false
+    local need_sink=false
+    local need_pair=false
+    local need_video_group=false
+    local need_secureboot_hint=false
+    local suggested_actions=""
+    local actions_first=true
+
+    action_add() {
+        local a="$1"
+        if [ -z "$a" ]; then
+            return 0
+        fi
+        if [ "$actions_first" = true ]; then
+            actions_first=false
+        else
+            suggested_actions+=$'\n'
+        fi
+        suggested_actions+="$a"
+    }
 
     doctor_emit() {
         local key="$1"
@@ -2014,6 +2123,7 @@ cmd_doctor() {
     else
         doctor_emit "adb" "FAIL" "Install android platform-tools / android-tools-adb"
         fails=$((fails+1))
+        need_adb=true
     fi
 
     local scrcpy_bin=""
@@ -2032,13 +2142,15 @@ cmd_doctor() {
     else
         doctor_emit "scrcpy>=2.0" "FAIL" "Install scrcpy via Snap/Flatpak/package manager"
         fails=$((fails+1))
+        need_scrcpy=true
     fi
 
-    if [ -c /dev/video10 ]; then
-        doctor_emit "/dev/video10" "OK" "virtual camera device present"
+    if sink_exists "$V4L2_SINK"; then
+        doctor_emit "v4l2 sink" "OK" "$V4L2_SINK present"
     else
-        doctor_emit "/dev/video10" "FAIL" "missing virtual camera device"
+        doctor_emit "v4l2 sink" "FAIL" "$V4L2_SINK missing"
         fails=$((fails+1))
+        need_sink=true
     fi
 
     if lsmod 2>/dev/null | grep -q '^v4l2loopback'; then
@@ -2066,6 +2178,7 @@ cmd_doctor() {
         else
             doctor_emit "video group" "WARN" "run: sudo usermod -aG video $USER and re-login"
             warns=$((warns+1))
+            need_video_group=true
         fi
     fi
 
@@ -2075,6 +2188,7 @@ cmd_doctor() {
         if echo "$sb_state" | grep -qi 'enabled'; then
             doctor_emit "Secure Boot" "WARN" "enabled (unsigned v4l2loopback may fail)"
             warns=$((warns+1))
+            need_secureboot_hint=true
         elif echo "$sb_state" | grep -qi 'disabled'; then
             doctor_emit "Secure Boot" "OK" "disabled"
         else
@@ -2088,11 +2202,13 @@ cmd_doctor() {
         if [ -z "${PHONE_IP:-}" ]; then
             doctor_emit "PHONE_IP" "WARN" "not set (run: android-webcam-ctl setup)"
             warns=$((warns+1))
+            need_pair=true
         elif validate_ip "$PHONE_IP"; then
             doctor_emit "PHONE_IP" "OK" "$PHONE_IP"
         else
             doctor_emit "PHONE_IP" "WARN" "invalid format in config: $PHONE_IP"
             warns=$((warns+1))
+            need_pair=true
         fi
     else
         doctor_emit "Config" "WARN" "could not load $CONFIG_FILE"
@@ -2121,8 +2237,43 @@ cmd_doctor() {
         result="warn"
     fi
 
+    # Suggested actions (top priority first)
+    if [ "$need_adb" = true ]; then
+        action_add "Install adb: on Debian/Ubuntu -> sudo apt install android-tools-adb"
+    fi
+    if [ "$need_scrcpy" = true ]; then
+        action_add "Install scrcpy >= 2.0 (Snap/Flatpak/GitHub release)"
+    fi
+    if [ "$need_sink" = true ]; then
+        action_add "Ensure v4l2loopback is loaded (default sink /dev/video10): sudo modprobe v4l2loopback"
+    fi
+    if [ "$need_pair" = true ]; then
+        action_add "Pair phone again: android-webcam-ctl setup"
+    fi
+    if [ "$need_video_group" = true ]; then
+        action_add "Add user to video group: sudo usermod -aG video $USER (then log out/in)"
+    fi
+    if [ "$need_secureboot_hint" = true ]; then
+        action_add "Secure Boot is enabled: disable it or sign v4l2loopback module (MOK)"
+    fi
+
     if [ "$json_mode" = true ]; then
-        printf '{"result":"%s","fails":%s,"warnings":%s,"checks":{%s}}\n' "$result" "$fails" "$warns" "$doctor_items"
+        # Convert suggested_actions lines to JSON array
+        local actions_json=""
+        if [ -n "$suggested_actions" ]; then
+            local line
+            local first=true
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                if [ "$first" = true ]; then
+                    first=false
+                else
+                    actions_json+="," 
+                fi
+                actions_json+="\"$(doctor_json_escape "$line")\""
+            done <<< "$suggested_actions"
+        fi
+        printf '{"result":"%s","fails":%s,"warnings":%s,"checks":{%s},"suggested_actions":[%s]}\n' "$result" "$fails" "$warns" "$doctor_items" "$actions_json"
     else
         echo ""
         echo -e "Doctor result: ${RED}${fails} fail${NC}, ${YELLOW}${warns} warning${NC}"
@@ -2130,11 +2281,19 @@ cmd_doctor() {
             echo "Suggested quick fixes:"
             echo "- Re-run installer: curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash"
             echo "- Pair phone again: android-webcam-ctl setup"
-            echo "- If /dev/video10 missing: sudo modprobe v4l2loopback"
+            echo "- If v4l2 sink missing (default /dev/video10): sudo modprobe v4l2loopback"
         elif [ "$warns" -gt 0 ]; then
             echo "Warnings detected. Camera may still work, but reliability can be reduced."
         else
             echo -e "${GREEN}All key checks passed.${NC}"
+        fi
+        if [ -n "$suggested_actions" ]; then
+            echo ""
+            echo "Suggested actions:"
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                echo "- $line"
+            done <<< "$suggested_actions"
         fi
         echo "Exit codes: 0=OK, 1=FAIL, 2=WARN"
     fi

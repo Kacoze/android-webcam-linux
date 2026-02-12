@@ -19,6 +19,9 @@ jobs:
       - name: Verify installer checksum file
         run: ./scripts/verify-install-checksum.sh
 
+      - name: Runtime script smoke tests (mocked)
+        run: bash ./scripts/runtime-ci-tests.sh
+
       - name: Installer help smoke test
         run: bash install.sh --help
 

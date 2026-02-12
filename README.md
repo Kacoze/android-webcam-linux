@@ -467,7 +467,7 @@ See FAQ section "What to do when Secure Boot blocks the v4l2loopback module?" fo
    android-webcam-ctl stop
    android-webcam-ctl start
    ```
-4. Check logs: `/tmp/android-cam.log`
+4. Check logs: `~/.local/state/android-webcam/logs/latest.log` (legacy path: `/tmp/android-cam.log`)
 
 #### Poor quality or lagging video
 
