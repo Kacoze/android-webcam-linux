@@ -24,7 +24,7 @@ done
 # =============================================================================
 
 # --- CONSTANTS & COLORS ---
-readonly SCRIPT_VERSION="1.0.1"
+readonly SCRIPT_VERSION="1.0.2"
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
 readonly RED='\033[0;31m'
@@ -352,14 +352,23 @@ check_path
 check_video_group
 
 # Detect existing installation (best-effort)
-if [ -x /usr/local/bin/android-webcam-ctl ]; then
+existing_ctl=""
+if command -v android-webcam-ctl >/dev/null 2>&1; then
+    existing_ctl="$(command -v android-webcam-ctl)"
+elif [ -x /usr/local/bin/android-webcam-ctl ]; then
+    existing_ctl="/usr/local/bin/android-webcam-ctl"
+elif [ -x /usr/bin/android-webcam-ctl ]; then
+    existing_ctl="/usr/bin/android-webcam-ctl"
+fi
+
+if [ -n "$existing_ctl" ] && [ -x "$existing_ctl" ]; then
     existing_ver="unknown"
-    if /usr/local/bin/android-webcam-ctl version >/dev/null 2>&1; then
-        existing_ver=$(/usr/local/bin/android-webcam-ctl version 2>/dev/null || echo "unknown")
+    if "$existing_ctl" version >/dev/null 2>&1; then
+        existing_ver=$("$existing_ctl" version 2>/dev/null || echo "unknown")
         existing_ver=$(echo "$existing_ver" | tr -d '\r\n' | sed -n '1p')
         [ -z "$existing_ver" ] && existing_ver="unknown"
     fi
-    log_info "Existing install detected: android-webcam-ctl (version: $existing_ver)"
+    log_info "Existing install detected: $existing_ctl (version: $existing_ver)"
 fi
 
 DISTRO=$(detect_distro)
