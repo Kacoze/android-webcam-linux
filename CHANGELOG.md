@@ -20,22 +20,28 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 - First stable release (renumbered).
 
-## Legacy (pre-1.0.0)
+## Versions below 1.0.0
 
-This section reflects earlier internal versioning that has been removed from GitHub Releases/tags.
+## [0.9.2] - 2026-02-12
 
-### 2.5.x
+- Minisign signing enabled in release pipeline.
 
-- Minisign signing support in release pipeline.
+## [0.9.1] - 2026-02-12
+
+- Release workflow hardened to publish even when signing is not configured.
+
+## [0.9.0] - 2026-02-12
+
 - Release notes generated from git history.
 - Debian package artifacts and checksums.
+- AUR packaging template.
 
-### 2.4.0
+## [0.8.0] - 2026-02-12
 
 - One-liner hardening (bootstrap + checksum).
 - Installer `--yes` and `--check-only`.
 - `doctor` diagnostics and runtime logging improvements.
 
-### 2.3.0
+## [0.7.0] - 2026-02-12
 
 - Release-based bootstrap flow and checksum validation.
