@@ -1,5 +1,2 @@
-untrusted comment: minisign public key for android-webcam-linux releases
-# Replace this key with your real minisign public key.
-# You can also provide a key at runtime via ANDROID_WEBCAM_MINISIGN_PUBKEY.
-
-RWQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+untrusted comment: minisign public key 33D237B88E6C894
+RWSUyOaIeyM9AzbH9gV93CcwFJc290JIB6pP8Z8RRkaiICnmxmQUshkj

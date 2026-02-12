@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-02-12
+
+- Enabled minisign signing in release pipeline (install.sh signatures published for tagged releases).
+
 ## [2.5.1] - 2026-02-12
 
 - Fix release workflow to publish even when optional signatures are not configured.
