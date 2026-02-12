@@ -42,43 +42,32 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y minisign
 
       - name: Sign release assets (optional)
-        if: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
         run: |
           set -euo pipefail
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "MINISIGN_SECRET_KEY not configured; skipping signing."
+            exit 0
+          fi
           echo "$MINISIGN_SECRET_KEY" > minisign.key
           minisign -Sm install.sh -s minisign.key -x install.sh.minisig
           minisign -Sm install.sh.sha256 -s minisign.key -x install.sh.sha256.minisig
-          :
 
       - name: Generate release notes
         run: ./scripts/generate-release-notes.sh "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
 
-      - name: Publish GitHub release (with signatures)
-        if: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: false
           files: |
             install.sh
             install.sh.sha256
             install.sh.minisig
             install.sh.sha256.minisig
-            minisign.pub
-            dist/*.deb
-            dist/*.deb.sha256
-
-      - name: Publish GitHub release (no signatures)
-        if: ${{ secrets.MINISIGN_SECRET_KEY == '' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          body_path: RELEASE_NOTES.md
-          files: |
-            install.sh
-            install.sh.sha256
             minisign.pub
             dist/*.deb
             dist/*.deb.sha256

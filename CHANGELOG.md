@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-02-12
+
+- Fix release workflow to publish even when optional signatures are not configured.
+
 ## [2.5.0] - 2026-02-12
 
 - Added runtime `version` command and improved release upgrade detection.
