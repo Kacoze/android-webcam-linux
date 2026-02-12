@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build installer from src
         run: ./scripts/build-installer.sh
@@ -33,32 +35,50 @@ jobs:
       - name: Build Debian package (Ubuntu/Debian)
         run: ./scripts/build-deb.sh "${GITHUB_REF_NAME}"
 
-      - name: Generate release notes
-        id: notes
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const tag = context.ref.replace('refs/tags/', '')
-            const body = [
-              '## Highlights',
-              '- Automated release published from tag workflow.',
-              '- Installer checksum and one-liner preflight validated in CI.',
-              '',
-              '## Installation (one-liner)',
-              '```bash',
-              'curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash',
-              '```',
-              '',
-              `Tag: ${tag}`
-            ].join('\n')
-            core.setOutput('body', body)
+      - name: Prepare minisign public key asset
+        run: cp -f keys/minisign.pub minisign.pub
 
-      - name: Publish GitHub release
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      - name: Sign release assets (optional)
+        if: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          echo "$MINISIGN_SECRET_KEY" > minisign.key
+          minisign -Sm install.sh -s minisign.key -x install.sh.minisig
+          minisign -Sm install.sh.sha256 -s minisign.key -x install.sh.sha256.minisig
+          :
+
+      - name: Generate release notes
+        run: ./scripts/generate-release-notes.sh "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+
+      - name: Publish GitHub release (with signatures)
+        if: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          body: ${{ steps.notes.outputs.body }}
+          body_path: RELEASE_NOTES.md
           files: |
             install.sh
             install.sh.sha256
+            install.sh.minisig
+            install.sh.sha256.minisig
+            minisign.pub
             dist/*.deb
+            dist/*.deb.sha256
+
+      - name: Publish GitHub release (no signatures)
+        if: ${{ secrets.MINISIGN_SECRET_KEY == '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
+          files: |
+            install.sh
+            install.sh.sha256
+            minisign.pub
+            dist/*.deb
+            dist/*.deb.sha256

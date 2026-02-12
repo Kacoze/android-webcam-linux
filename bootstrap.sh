@@ -6,6 +6,8 @@ REF="${ANDROID_WEBCAM_REF:-}"
 ALLOW_UNVERIFIED="${ANDROID_WEBCAM_ALLOW_UNVERIFIED:-0}"
 LOCAL_MODE="${ANDROID_WEBCAM_LOCAL:-0}"
 STABLE_ONLY="${ANDROID_WEBCAM_STABLE_ONLY:-0}"
+REQUIRE_SIGNATURE="${ANDROID_WEBCAM_REQUIRE_SIGNATURE:-0}"
+MINISIGN_PUBKEY="${ANDROID_WEBCAM_MINISIGN_PUBKEY:-}"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -48,6 +50,51 @@ download_from_release_assets() {
     local base="https://github.com/${repo}/releases/download/${ref}"
     download_file "$base/install.sh" "$out_install"
     download_file "$base/install.sh.sha256" "$out_checksum"
+}
+
+verify_signature_if_possible() {
+    local file="$1"
+    local sig="$2"
+    local pubkey_file="$3"
+
+    if [ ! -f "$sig" ]; then
+        if [ "$REQUIRE_SIGNATURE" = "1" ]; then
+            echo "Error: signature file missing: $sig" >&2
+            return 1
+        fi
+        return 0
+    fi
+
+    if ! have minisign; then
+        if [ "$REQUIRE_SIGNATURE" = "1" ]; then
+            echo "Error: minisign is required for signature verification." >&2
+            return 1
+        fi
+        echo "Warning: minisign not installed; skipping signature verification." >&2
+        return 0
+    fi
+
+    if [ ! -f "$pubkey_file" ]; then
+        if [ "$REQUIRE_SIGNATURE" = "1" ]; then
+            echo "Error: minisign public key not available." >&2
+            return 1
+        fi
+        echo "Warning: minisign public key not available; skipping signature verification." >&2
+        return 0
+    fi
+
+    local pubkey
+    pubkey=$(grep -E '^[A-Za-z0-9+/=]{20,}$' "$pubkey_file" | sed -n '1p' || true)
+    if [ -z "$pubkey" ]; then
+        if [ "$REQUIRE_SIGNATURE" = "1" ]; then
+            echo "Error: invalid minisign public key file: $pubkey_file" >&2
+            return 1
+        fi
+        echo "Warning: invalid minisign public key file; skipping signature verification." >&2
+        return 0
+    fi
+
+    minisign -Vm "$file" -x "$sig" -P "$pubkey" >/dev/null 2>&1
 }
 
 sha256_cmd() {
@@ -141,6 +188,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 install_file="$tmp_dir/install.sh"
 checksum_file="$tmp_dir/install.sh.sha256"
+sig_file="$tmp_dir/install.sh.minisig"
+pubkey_file="$tmp_dir/minisign.pub"
 
 echo "Downloading installer from ${REPO}@${REF}..."
 
@@ -164,10 +213,29 @@ if [ "$download_ok" = false ]; then
     fi
 fi
 
+# Best-effort: download signature and public key
+if [[ "$REF" == v* ]]; then
+    base="https://github.com/${REPO}/releases/download/${REF}"
+    download_file "$base/install.sh.minisig" "$sig_file" 2>/dev/null || true
+    download_file "$base/minisign.pub" "$pubkey_file" 2>/dev/null || true
+fi
+if [ ! -f "$sig_file" ]; then
+    download_file "$raw_base/install.sh.minisig" "$sig_file" 2>/dev/null || true
+fi
+if [ -n "$MINISIGN_PUBKEY" ]; then
+    printf "%s\n" "$MINISIGN_PUBKEY" > "$pubkey_file"
+elif [ ! -f "$pubkey_file" ]; then
+    download_file "$raw_base/keys/minisign.pub" "$pubkey_file" 2>/dev/null || true
+fi
+
 if [ -n "${checksum_file:-}" ] && [ -f "${checksum_file:-}" ]; then
     verify_checksum "$install_file" "$checksum_file"
     echo "Checksum verified."
 else
+    if [ "$STABLE_ONLY" = "1" ]; then
+        echo "Error: checksum file missing (STABLE_ONLY=1)." >&2
+        exit 1
+    fi
     if [ "$ALLOW_UNVERIFIED" = "1" ]; then
         echo "Warning: checksum file not found; continuing (ANDROID_WEBCAM_ALLOW_UNVERIFIED=1)." >&2
     else
@@ -175,6 +243,15 @@ else
         echo "Set ANDROID_WEBCAM_ALLOW_UNVERIFIED=1 to bypass (not recommended)." >&2
         exit 1
     fi
+fi
+
+if verify_signature_if_possible "$install_file" "$sig_file" "$pubkey_file"; then
+    if [ -f "$sig_file" ] && have minisign; then
+        echo "Signature verified."
+    fi
+else
+    echo "Error: signature verification failed." >&2
+    exit 1
 fi
 
 exec bash "$install_file" "$@"

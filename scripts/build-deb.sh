@@ -28,10 +28,13 @@ trap 'rm -rf "$staging"' EXIT
 
 root="$staging/root"
 mkdir -p "$root/DEBIAN" "$root/usr/local/bin" "$root/usr/share/applications"
+mkdir -p "$root/usr/share/android-webcam"
 
 install -m 0755 "$REPO_ROOT/src/android-webcam-ctl" "$root/usr/local/bin/android-webcam-ctl"
 install -m 0644 "$REPO_ROOT/src/android-webcam-common" "$root/usr/local/bin/android-webcam-common"
 install -m 0755 "$REPO_ROOT/src/android-webcam-run-in-terminal" "$root/usr/local/bin/android-webcam-run-in-terminal"
+
+echo "$version" > "$root/usr/share/android-webcam/VERSION"
 
 cat > "$root/usr/share/applications/android-cam.desktop" <<'EOF'
 [Desktop Entry]
@@ -115,5 +118,9 @@ chmod 0755 "$root/DEBIAN/postinst"
 
 deb_out="$out_dir/${pkg_name}_${version}_${arch}.deb"
 dpkg-deb --build "$root" "$deb_out" >/dev/null
+
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "$deb_out" > "$deb_out.sha256"
+fi
 
 echo "$deb_out"

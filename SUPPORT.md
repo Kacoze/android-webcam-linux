@@ -20,6 +20,14 @@ Latest runtime log (after start attempts):
 
 `~/.local/state/android-webcam/logs/latest.log` (legacy: `/tmp/android-cam.log`)
 
+Useful runtime commands:
+
+```bash
+android-webcam-ctl start --dry-run
+android-webcam-ctl logs
+android-webcam-ctl version
+```
+
 ## 2) Common failures and fixes
 
 ### `/dev/video10` missing

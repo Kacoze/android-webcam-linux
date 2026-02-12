@@ -77,6 +77,8 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bo
 
 The bootstrap script resolves a release ref, downloads `install.sh`, verifies `install.sh.sha256`, and then runs the installer.
 
+When `ANDROID_WEBCAM_REF` points to a tag (e.g. `vX.Y.Z`), bootstrap prefers downloading release assets from GitHub Releases.
+
 The installer is interactive by default. For non-interactive environments, use `--yes`:
 
 ```bash
@@ -97,6 +99,10 @@ If you prefer a package install, download the latest `.deb` from GitHub Releases
 sudo dpkg -i android-webcam-linux_*.deb
 ```
 
+### Installation (Arch/AUR)
+
+This repo includes a PKGBUILD template in `packaging/aur/PKGBUILD`.
+
 ### One-liner security model
 
 - `bootstrap.sh` downloads `install.sh` and `install.sh.sha256` from the selected ref.
@@ -104,6 +110,12 @@ sudo dpkg -i android-webcam-linux_*.deb
 - If release lookup fails, bootstrap falls back to `main`.
 - `ANDROID_WEBCAM_STABLE_ONLY=1` disables fallback to `main` (fail if no release/assets).
 - `ANDROID_WEBCAM_ALLOW_UNVERIFIED=1` bypasses checksum only as an emergency fallback (not recommended).
+
+Optional signature verification:
+
+- If `install.sh.minisig` is available and `minisign` is installed, bootstrap can verify signatures.
+- Use `ANDROID_WEBCAM_REQUIRE_SIGNATURE=1` to require signature verification (fails if signature or key is missing).
+- Provide the minisign public key via `ANDROID_WEBCAM_MINISIGN_PUBKEY` or keep it in `keys/minisign.pub`.
 
 ### Maintainer note (checksum)
 
