@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-02-12
+
+- .deb packaging improvements (/usr/bin paths, prerm/postrm, license).
+- Improved CLI contract (doctor schema_version, better exit codes, logs follow/sessions).
+- Added manual integration matrix workflow and optional APT repo publishing workflow.
+
 ## [1.0.0] - 2026-02-12
 
 - First stable release (renumbered).

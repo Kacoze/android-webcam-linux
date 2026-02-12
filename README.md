@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bo
 To pin a specific version/ref (recommended for reproducible installs):
 
 ```bash
-ANDROID_WEBCAM_REF="v1.0.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
+ANDROID_WEBCAM_REF="v1.0.1" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 
 ### Installation (Debian/Ubuntu .deb)
@@ -97,6 +97,21 @@ If you prefer a package install, download the latest `.deb` from GitHub Releases
 
 ```bash
 sudo dpkg -i android-webcam-linux_*.deb
+```
+
+### Installation (APT repo)
+
+If GitHub Pages APT repository is enabled for this repo, you can install via APT.
+
+Maintainers: set repository variable `APT_PAGES_ENABLED=1` to publish the APT repo on tag pushes.
+
+Signed repo (recommended):
+
+```bash
+curl -fsSL https://Kacoze.github.io/android-webcam-linux/apt/repo.gpg | sudo gpg --dearmor -o /usr/share/keyrings/android-webcam-linux.gpg
+echo "deb [signed-by=/usr/share/keyrings/android-webcam-linux.gpg] https://Kacoze.github.io/android-webcam-linux/apt stable main" | sudo tee /etc/apt/sources.list.d/android-webcam-linux.list
+sudo apt update
+sudo apt install android-webcam-linux
 ```
 
 ### Installation (Arch/AUR)

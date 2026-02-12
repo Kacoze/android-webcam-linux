@@ -119,6 +119,7 @@ set -e
 expect_rc 2 "$rc" "doctor baseline"
 grep -q '"checks"' "$CI_DIR/doctor-ok.json"
 grep -q '"suggested_actions"' "$CI_DIR/doctor-ok.json"
+grep -q '"schema_version":1' "$CI_DIR/doctor-ok.json"
 
 # 2) doctor --json fails when sink missing
 home2=$(mk_test_home "doctor-sink-missing")
@@ -193,7 +194,7 @@ set +e
 run_cmd "$home5" "$RUNTIME_DIR/android-webcam-ctl" start --dry-run > "$CI_DIR/payload-missing.txt" 2>&1
 rc=$?
 set -e
-expect_rc 1 "$rc" "payload missing"
+expect_rc 16 "$rc" "payload missing"
 grep -q "scrcpy server payload is missing" "$CI_DIR/payload-missing.txt"
 
 echo "Runtime CI tests passed."

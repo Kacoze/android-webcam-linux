@@ -288,11 +288,13 @@ cmd_start() {
     # Check dependencies first
     if ! check_dependencies; then
         notify "critical" "Android Camera" "Missing dependencies" "error"
-        return 1
+        echo "Next: run '$0 doctor'" >&2
+        return 10
     fi
     
     if ! load_config; then
-        return 1
+        echo "Next: run '$0 doctor'" >&2
+        return 11
     fi
     
     if is_running; then
@@ -306,12 +308,14 @@ cmd_start() {
         notify "normal" "Android Camera" "Running setup – connect USB when prompted" "camera-web"
         cmd_fix
         if ! load_config; then
-            return 1
+            echo "Next: run '$0 doctor'" >&2
+            return 11
         fi
         if [ -z "$PHONE_IP" ]; then
             echo -e "${RED}Error:${NC} PHONE_IP not set. Run '$0 setup' or '$0 config' to set it."
             notify "critical" "Android Camera" "Config Error: No IP set" "error"
-            return 1
+            echo "Next: run '$0 setup'" >&2
+            return 11
         fi
     fi
     
@@ -319,7 +323,8 @@ cmd_start() {
     if ! validate_ip "$PHONE_IP"; then
         echo -e "${RED}Error:${NC} Invalid IP address format: $PHONE_IP"
         notify "critical" "Android Camera" "Invalid IP address" "error"
-        return 1
+        echo "Next: run '$0 config' and fix PHONE_IP" >&2
+        return 11
     fi
 
     prepare_session_log
@@ -334,7 +339,8 @@ cmd_start() {
             echo -e "${RED}Error:${NC} Failed to connect to $PHONE_IP:5555"
             echo "Tip: run '$0 setup' to re-pair USB and enable TCP/IP mode again."
             notify "critical" "Android Camera" "Connection failed" "error"
-            return 1
+            echo "Next: run '$0 setup'" >&2
+            return 12
         fi
     fi
     
@@ -342,12 +348,14 @@ cmd_start() {
     if [ -z "$SCRCPY_BIN" ]; then
         echo -e "${RED}Error:${NC} scrcpy not found!"
         notify "critical" "Android Camera" "Error: scrcpy not found" "error"
-        return 1
+        echo "Next: install scrcpy >= 2.0" >&2
+        return 14
     fi
 
     if ! check_scrcpy_server_payload "$SCRCPY_BIN"; then
         notify "critical" "Android Camera" "scrcpy install incomplete (missing server payload)" "error"
-        return 1
+        echo "Next: reinstall scrcpy (Snap/Flatpak/system)" >&2
+        return 16
     fi
 
     # Construct the command
@@ -395,7 +403,8 @@ cmd_start() {
             echo -e "${RED}Error:${NC} V4L2 sink '$V4L2_SINK' not found."
             echo "Set ANDROID_WEBCAM_V4L2_SINK to an existing device, or use the default /dev/video10."
             notify "critical" "Android Camera" "Video device not found" "error"
-            return 1
+            echo "Next: set V4L2_SINK in config or env" >&2
+            return 13
         fi
         echo -e "${YELLOW}Warning:${NC} $V4L2_SINK not found. Attempting to fix v4l2loopback module..."
         notify "normal" "Android Camera" "Fixing video module..." "camera-web"
@@ -405,7 +414,8 @@ cmd_start() {
             echo -e "${RED}Error:${NC} sudo not available. Cannot load module automatically."
             echo "Please run: sudo modprobe v4l2loopback video_nr=10 card_label=\"Android Cam\" exclusive_caps=1"
             notify "critical" "Android Camera" "Video device not found" "error"
-            return 1
+            echo "Next: install sudo and run 'sudo modprobe v4l2loopback'" >&2
+            return 13
         fi
         
         # Check if sudo can work without password
@@ -607,7 +617,8 @@ Or reboot your system." 2>/dev/null || true
                 fi
             fi
             
-            return 1
+            echo "Next: run '$0 doctor'" >&2
+            return 13
         fi
     fi
     
@@ -635,7 +646,8 @@ Or reboot your system." 2>/dev/null || true
         if [[ "$EXTRA_ARGS" =~ [\;\|\&\`\$\(\)\<\>] ]]; then
             echo -e "${RED}Error:${NC} EXTRA_ARGS contains unsafe characters (; | & \` $ etc.). Only use scrcpy arguments."
             notify "critical" "Android Camera" "Unsafe config detected" "error"
-            return 1
+            echo "Next: remove unsafe chars from EXTRA_ARGS" >&2
+            return 15
         fi
         
         # Safe parsing: split by spaces and validate each argument
@@ -652,7 +664,8 @@ Or reboot your system." 2>/dev/null || true
             if [[ "$arg" =~ [\;\|\&\`\$] ]]; then
                 echo -e "${RED}Error:${NC} Unsafe argument detected: $arg"
                 notify "critical" "Android Camera" "Unsafe argument in config" "error"
-                return 1
+                echo "Next: remove unsafe args from EXTRA_ARGS" >&2
+                return 15
             fi
             
             # Only add non-empty arguments
@@ -720,6 +733,8 @@ Or reboot your system." 2>/dev/null || true
                 echo "Log file: $LOG_FILE"
             fi
             notify "critical" "Camera Error" "Failed to start. Check logs." "error"
+            echo "Next: run '$0 logs'" >&2
+            return 20
         fi
     else
         # ps not available, assume it started
@@ -806,20 +821,30 @@ cmd_logs() {
     ensure_state_dirs
 
     local tail_n="80"
+    local follow=false
     case "${1:-}" in
         "") ;;
+        --follow|-f)
+            follow=true
+            ;;
         --tail)
             tail_n="${2:-80}"
             ;;
         -n)
             tail_n="${2:-80}"
             ;;
+        --sessions)
+            if command -v ls >/dev/null 2>&1; then
+                ls -1 "$LOG_DIR"/session-*.log 2>/dev/null || true
+            fi
+            return 0
+            ;;
         --path)
             echo "$LATEST_LOG"
             return 0
             ;;
         *)
-            echo "Usage: $0 logs [--path] [--tail N|-n N]" >&2
+            echo "Usage: $0 logs [--path] [--sessions] [--follow|-f] [--tail N|-n N]" >&2
             return 1
             ;;
     esac
@@ -833,7 +858,11 @@ cmd_logs() {
 
     # Print last N lines
     if command -v tail >/dev/null 2>&1; then
-        tail -n "$tail_n" "$LATEST_LOG" 2>/dev/null || true
+        if [ "$follow" = true ]; then
+            tail -n "$tail_n" -f "$LATEST_LOG"
+        else
+            tail -n "$tail_n" "$LATEST_LOG" 2>/dev/null || true
+        fi
     elif command -v sed >/dev/null 2>&1; then
         # Best-effort: show the whole file if tail is missing
         sed -n '1,200p' "$LATEST_LOG" 2>/dev/null || true
@@ -1367,7 +1396,7 @@ cmd_doctor() {
                 actions_json+="\"$(doctor_json_escape "$line")\""
             done <<< "$suggested_actions"
         fi
-        printf '{"result":"%s","fails":%s,"warnings":%s,"checks":{%s},"suggested_actions":[%s]}\n' "$result" "$fails" "$warns" "$doctor_items" "$actions_json"
+        printf '{"schema_version":1,"result":"%s","fails":%s,"warnings":%s,"checks":{%s},"suggested_actions":[%s]}\n' "$result" "$fails" "$warns" "$doctor_items" "$actions_json"
     else
         echo ""
         echo -e "Doctor result: ${RED}${fails} fail${NC}, ${YELLOW}${warns} warning${NC}"
@@ -1497,7 +1526,7 @@ case "$1" in
         echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|config|uninstall}"
         echo "       $0 doctor [--json]"
         echo "       $0 start [--dry-run]"
-        echo "       $0 logs [--path] [--tail N|-n N]"
+        echo "       $0 logs [--path] [--sessions] [--follow|-f] [--tail N|-n N]"
         exit 1
         ;;
 esac

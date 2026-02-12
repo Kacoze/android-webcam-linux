@@ -1,0 +1,101 @@
+name: APT Repo (Pages)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: ${{ vars.APT_PAGES_ENABLED == '1' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install APT tooling
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev apt-utils gnupg
+
+      - name: Build installer from src
+        run: ./scripts/build-installer.sh
+
+      - name: Build Debian package
+        run: ./scripts/build-deb.sh "${GITHUB_REF_NAME:-v0.0.0}"
+
+      - name: Build APT repository
+        run: |
+          set -euo pipefail
+          mkdir -p public
+          ./scripts/build-apt-repo.sh public dist/*.deb
+
+      - name: Sign APT Release (optional)
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APT_GPG_PRIVATE_KEY:-}" ]; then
+            echo "APT_GPG_PRIVATE_KEY not configured; publishing unsigned repo."
+            exit 0
+          fi
+
+          echo "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+
+          key_fpr=$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1=="fpr" {print $10; exit}')
+          if [ -z "$key_fpr" ]; then
+            echo "Error: could not determine imported GPG key fingerprint" >&2
+            exit 1
+          fi
+
+          repo_root="public/apt"
+          rel="${repo_root}/dists/stable/Release"
+          if [ ! -f "$rel" ]; then
+            echo "Error: Release file missing: $rel" >&2
+            exit 1
+          fi
+
+          # Export public key for users
+          gpg --batch --yes --armor --export "$key_fpr" > "${repo_root}/repo.gpg"
+
+          # Detached signature
+          if [ -n "${APT_GPG_PASSPHRASE:-}" ]; then
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$APT_GPG_PASSPHRASE" \
+              --local-user "$key_fpr" -abs -o "${rel}.gpg" "$rel"
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$APT_GPG_PASSPHRASE" \
+              --local-user "$key_fpr" --clearsign -o "${repo_root}/dists/stable/InRelease" "$rel"
+          else
+            gpg --batch --yes --local-user "$key_fpr" -abs -o "${rel}.gpg" "$rel"
+            gpg --batch --yes --local-user "$key_fpr" --clearsign -o "${repo_root}/dists/stable/InRelease" "$rel"
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    if: ${{ vars.APT_PAGES_ENABLED == '1' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

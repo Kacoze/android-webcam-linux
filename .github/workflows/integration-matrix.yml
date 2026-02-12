@@ -1,0 +1,58 @@
+name: Integration Matrix (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Optional run notes"
+        required: false
+        type: string
+
+jobs:
+  container-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: debian
+            image: debian:bookworm-slim
+            prep: apt-get update && apt-get install -y bash curl wget ca-certificates git
+          - name: fedora
+            image: fedora:41
+            prep: dnf install -y bash curl wget ca-certificates git
+          - name: arch
+            image: archlinux:latest
+            prep: pacman -Sy --noconfirm bash curl wget ca-certificates git
+          - name: opensuse
+            image: opensuse/leap:15.6
+            prep: zypper --non-interactive refresh && zypper --non-interactive install bash curl wget ca-certificates git
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare tools
+        shell: bash
+        run: ${{ matrix.prep }}
+
+      - name: Bash syntax check
+        shell: bash
+        run: bash -n bootstrap.sh install.sh scripts/*.sh src/*
+
+      - name: Build installer from src (must be clean)
+        shell: bash
+        run: ./scripts/build-installer.sh && git diff --exit-code install.sh
+
+      - name: Verify installer checksum
+        shell: bash
+        run: ./scripts/verify-install-checksum.sh
+
+      - name: One-liner preflight smoke
+        shell: bash
+        run: ANDROID_WEBCAM_LOCAL=1 bash bootstrap.sh --yes --check-only
+
+      - name: Runtime contract tests (mocked)
+        shell: bash
+        run: bash ./scripts/runtime-ci-tests.sh
