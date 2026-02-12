@@ -2,7 +2,7 @@
 # android-webcam-run-in-terminal - run android-webcam-ctl status/config/setup in a terminal (for desktop actions)
 
 set -e
-CTL="/usr/local/bin/android-webcam-ctl"
+CTL="$(command -v android-webcam-ctl 2>/dev/null || echo /usr/local/bin/android-webcam-ctl)"
 case "${1:-}" in
     status)  CMD="$CTL status; read -r -p \"Press Enter to close...\"; exec bash" ;;
     config)  CMD="$CTL config" ;;

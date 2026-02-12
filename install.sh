@@ -218,6 +218,8 @@ uninstall() {
     sudo rm -f /usr/local/bin/android-webcam-ctl
     sudo rm -f /usr/local/bin/android-webcam-common
     sudo rm -f /usr/local/bin/android-webcam-run-in-terminal
+    sudo rm -rf /usr/local/share/android-webcam
+    sudo rm -rf /usr/share/android-webcam
     rm -f "$HOME/.local/bin/android-webcam-ctl"   # cleanup legacy (old install location)
     rm -f "$HOME/.local/bin/android-cam-toggle.sh" # cleanup legacy
     rm -f "$HOME/.local/bin/android-cam-fix.sh"    # cleanup legacy
@@ -348,6 +350,17 @@ check_sudo
 check_internet
 check_path
 check_video_group
+
+# Detect existing installation (best-effort)
+if [ -x /usr/local/bin/android-webcam-ctl ]; then
+    existing_ver="unknown"
+    if /usr/local/bin/android-webcam-ctl version >/dev/null 2>&1; then
+        existing_ver=$(/usr/local/bin/android-webcam-ctl version 2>/dev/null || echo "unknown")
+        existing_ver=$(echo "$existing_ver" | tr -d '\r\n' | sed -n '1p')
+        [ -z "$existing_ver" ] && existing_ver="unknown"
+    fi
+    log_info "Existing install detected: android-webcam-ctl (version: $existing_ver)"
+fi
 
 DISTRO=$(detect_distro)
 # Capitalize first letter (compatible with both GNU sed and BSD sed)
@@ -944,7 +957,7 @@ cat << 'RUNTERMEOF' > "$TMP_RUNTERM"
 # android-webcam-run-in-terminal - run android-webcam-ctl status/config/setup in a terminal (for desktop actions)
 
 set -e
-CTL="/usr/local/bin/android-webcam-ctl"
+CTL="$(command -v android-webcam-ctl 2>/dev/null || echo /usr/local/bin/android-webcam-ctl)"
 case "${1:-}" in
     status)  CMD="$CTL status; read -r -p \"Press Enter to close...\"; exec bash" ;;
     config)  CMD="$CTL config" ;;
@@ -1009,6 +1022,8 @@ cat << 'EOF' > "$TMP_CTL"
 
 CONFIG_DIR="$HOME/.config/android-webcam"
 CONFIG_FILE="$CONFIG_DIR/settings.conf"
+VERSION_FILE_PRIMARY="/usr/local/share/android-webcam/VERSION"
+VERSION_FILE_FALLBACK="/usr/share/android-webcam/VERSION"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/android-webcam"
 LOG_DIR="$STATE_DIR/logs"
 LATEST_LOG="$LOG_DIR/latest.log"
@@ -1845,6 +1860,19 @@ cmd_logs() {
     fi
 }
 
+cmd_version() {
+    if [ -f "$VERSION_FILE_PRIMARY" ]; then
+        cat "$VERSION_FILE_PRIMARY" 2>/dev/null || true
+        return 0
+    fi
+    if [ -f "$VERSION_FILE_FALLBACK" ]; then
+        cat "$VERSION_FILE_FALLBACK" 2>/dev/null || true
+        return 0
+    fi
+    echo "unknown"
+    return 0
+}
+
 cmd_fix() {
     if ! command -v adb >/dev/null 2>&1; then
         echo -e "${RED}Error:${NC} adb not found!"
@@ -2221,6 +2249,15 @@ cmd_doctor() {
         need_scrcpy=true
     fi
 
+    # Load config early so doctor can report correct V4L2_SINK and PHONE_IP
+    local config_loaded=false
+    if load_config 2>/dev/null; then
+        config_loaded=true
+    else
+        doctor_emit "Config" "WARN" "could not load $CONFIG_FILE"
+        warns=$((warns+1))
+    fi
+
     if sink_exists "$V4L2_SINK"; then
         doctor_emit "v4l2 sink" "OK" "$V4L2_SINK present"
     else
@@ -2274,7 +2311,7 @@ cmd_doctor() {
         doctor_emit "Secure Boot" "INFO" "mokutil not installed"
     fi
 
-    if load_config 2>/dev/null; then
+    if [ "$config_loaded" = true ]; then
         if [ -z "${PHONE_IP:-}" ]; then
             doctor_emit "PHONE_IP" "WARN" "not set (run: android-webcam-ctl setup)"
             warns=$((warns+1))
@@ -2287,8 +2324,7 @@ cmd_doctor() {
             need_pair=true
         fi
     else
-        doctor_emit "Config" "WARN" "could not load $CONFIG_FILE"
-        warns=$((warns+1))
+        :
     fi
 
     if command -v adb >/dev/null 2>&1; then
@@ -2472,10 +2508,11 @@ case "$1" in
     status)  cmd_status ;;
     doctor)  cmd_doctor "${2:-}" ;;
     logs)    cmd_logs "${2:-}" "${3:-}" ;;
+    version) cmd_version ;;
     config)  cmd_config ;;
     uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|config|uninstall}"
+        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|config|uninstall}"
         echo "       $0 doctor [--json]"
         echo "       $0 start [--dry-run]"
         echo "       $0 logs [--path] [--tail N|-n N]"
@@ -2488,6 +2525,12 @@ if ! sudo install -m 0755 "$TMP_CTL" "$BIN_DIR/android-webcam-ctl"; then
     log_error "Failed to install android-webcam-ctl to $BIN_DIR!"
     exit 1
 fi
+
+# Write installed version marker
+if ! sudo mkdir -p /usr/local/share/android-webcam 2>/dev/null; then
+    :
+fi
+echo "$SCRIPT_VERSION" | sudo tee /usr/local/share/android-webcam/VERSION >/dev/null 2>&1 || true
 
 # Generate Config
 CONFIG_DIR="$HOME/.config/android-webcam"

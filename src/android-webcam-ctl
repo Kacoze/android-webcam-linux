@@ -4,6 +4,8 @@
 
 CONFIG_DIR="$HOME/.config/android-webcam"
 CONFIG_FILE="$CONFIG_DIR/settings.conf"
+VERSION_FILE_PRIMARY="/usr/local/share/android-webcam/VERSION"
+VERSION_FILE_FALLBACK="/usr/share/android-webcam/VERSION"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/android-webcam"
 LOG_DIR="$STATE_DIR/logs"
 LATEST_LOG="$LOG_DIR/latest.log"
@@ -840,6 +842,19 @@ cmd_logs() {
     fi
 }
 
+cmd_version() {
+    if [ -f "$VERSION_FILE_PRIMARY" ]; then
+        cat "$VERSION_FILE_PRIMARY" 2>/dev/null || true
+        return 0
+    fi
+    if [ -f "$VERSION_FILE_FALLBACK" ]; then
+        cat "$VERSION_FILE_FALLBACK" 2>/dev/null || true
+        return 0
+    fi
+    echo "unknown"
+    return 0
+}
+
 cmd_fix() {
     if ! command -v adb >/dev/null 2>&1; then
         echo -e "${RED}Error:${NC} adb not found!"
@@ -1216,6 +1231,15 @@ cmd_doctor() {
         need_scrcpy=true
     fi
 
+    # Load config early so doctor can report correct V4L2_SINK and PHONE_IP
+    local config_loaded=false
+    if load_config 2>/dev/null; then
+        config_loaded=true
+    else
+        doctor_emit "Config" "WARN" "could not load $CONFIG_FILE"
+        warns=$((warns+1))
+    fi
+
     if sink_exists "$V4L2_SINK"; then
         doctor_emit "v4l2 sink" "OK" "$V4L2_SINK present"
     else
@@ -1269,7 +1293,7 @@ cmd_doctor() {
         doctor_emit "Secure Boot" "INFO" "mokutil not installed"
     fi
 
-    if load_config 2>/dev/null; then
+    if [ "$config_loaded" = true ]; then
         if [ -z "${PHONE_IP:-}" ]; then
             doctor_emit "PHONE_IP" "WARN" "not set (run: android-webcam-ctl setup)"
             warns=$((warns+1))
@@ -1282,8 +1306,7 @@ cmd_doctor() {
             need_pair=true
         fi
     else
-        doctor_emit "Config" "WARN" "could not load $CONFIG_FILE"
-        warns=$((warns+1))
+        :
     fi
 
     if command -v adb >/dev/null 2>&1; then
@@ -1467,10 +1490,11 @@ case "$1" in
     status)  cmd_status ;;
     doctor)  cmd_doctor "${2:-}" ;;
     logs)    cmd_logs "${2:-}" "${3:-}" ;;
+    version) cmd_version ;;
     config)  cmd_config ;;
     uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|config|uninstall}"
+        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|config|uninstall}"
         echo "       $0 doctor [--json]"
         echo "       $0 start [--dry-run]"
         echo "       $0 logs [--path] [--tail N|-n N]"
