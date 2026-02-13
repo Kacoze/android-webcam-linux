@@ -130,17 +130,31 @@ do_uninstall() {
 
 install_runtime_scripts() {
   local tmp
+  local rc=0
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
 
-  resolve_source_files "$ROOT_DIR" "$tmp"
-  check_sudo
+  resolve_source_files "$ROOT_DIR" "$tmp" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    check_sudo || rc=$?
+  fi
+  if [ "$rc" -eq 0 ]; then
+    sudo install -m 0755 "$tmp/android-webcam-ctl" "$BIN_DIR/android-webcam-ctl" || rc=$?
+  fi
+  if [ "$rc" -eq 0 ]; then
+    sudo install -m 0644 "$tmp/android-webcam-common" "$BIN_DIR/android-webcam-common" || rc=$?
+  fi
+  if [ "$rc" -eq 0 ]; then
+    sudo install -m 0755 "$tmp/android-webcam-run-in-terminal" "$BIN_DIR/android-webcam-run-in-terminal" || rc=$?
+  fi
+  if [ "$rc" -eq 0 ]; then
+    sudo mkdir -p /usr/local/share/android-webcam || rc=$?
+  fi
+  if [ "$rc" -eq 0 ]; then
+    printf "%s\n" "$SCRIPT_VERSION" | sudo tee /usr/local/share/android-webcam/VERSION >/dev/null || rc=$?
+  fi
 
-  sudo install -m 0755 "$tmp/android-webcam-ctl" "$BIN_DIR/android-webcam-ctl"
-  sudo install -m 0644 "$tmp/android-webcam-common" "$BIN_DIR/android-webcam-common"
-  sudo install -m 0755 "$tmp/android-webcam-run-in-terminal" "$BIN_DIR/android-webcam-run-in-terminal"
-  sudo mkdir -p /usr/local/share/android-webcam
-  printf "%s\n" "$SCRIPT_VERSION" | sudo tee /usr/local/share/android-webcam/VERSION >/dev/null
+  rm -rf "$tmp"
+  return "$rc"
 }
 
 main() {

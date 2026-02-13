@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-02-13
+
+- Fixed installer cleanup bug causing `tmp: unbound variable` after successful install.
+- Removed function-level RETURN trap pattern to prevent similar shell cleanup errors.
+
 ## [1.1.0] - 2026-02-12
 
 - Refactored installer into modular files (`installer/main.sh`, `installer/lib/*.sh`); `install.sh` is now a thin wrapper.
