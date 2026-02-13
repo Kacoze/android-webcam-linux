@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-02-13
+
+- Set front camera as default for new installs/configs.
+- Fixed terminal desktop actions to close on Enter (no interactive shell).
+
 ## [1.2.1] - 2026-02-13
 
 - Removed `repair` command and menu action to keep UX focused on `setup` only.
