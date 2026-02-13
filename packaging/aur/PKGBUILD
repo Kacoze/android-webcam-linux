@@ -1,7 +1,7 @@
 # Maintainer: Kacoze
 
 pkgname=android-webcam-linux
-pkgver=1.2.5
+pkgver=1.2.6
 pkgrel=1
 pkgdesc="Use Android phone as a Linux webcam via scrcpy + v4l2loopback"
 arch=('any')

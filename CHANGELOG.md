@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-02-13
+
+- Added automatic post-stop cleanup when camera is closed via window/system "Quit" action.
+- Closing the camera window now triggers the same v4l2loopback reload path as `android-webcam-ctl stop`.
+
 ## [1.2.5] - 2026-02-13
 
 - Installer now offers enabling passwordless Stop Camera during setup and clearly states it creates a sudoers rule.
