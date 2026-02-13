@@ -1404,6 +1404,18 @@ cmd_passwordless_stop_status() {
 }
 
 cmd_enable_passwordless_stop() {
+    local auto_yes=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --yes|-y) auto_yes=true ;;
+            *)
+                echo "Usage: $0 enable-passwordless-stop [--yes]" >&2
+                return 1
+                ;;
+        esac
+        shift
+    done
+
     local modprobe_bin
     modprobe_bin=$(resolve_modprobe_bin)
     if [ -z "$modprobe_bin" ]; then
@@ -1430,7 +1442,10 @@ cmd_enable_passwordless_stop() {
     echo "  $modprobe_bin -r v4l2loopback"
     echo "  $modprobe_bin v4l2loopback"
     echo "Sudoers file to create/update: $SUDOERS_STOP_FILE"
-    read -r -p "Proceed? (y/N): " confirm
+    local confirm="y"
+    if [ "$auto_yes" != true ]; then
+        read -r -p "Proceed (write sudoers rule)? (y/N): " confirm
+    fi
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         echo "Cancelled."
         return 0
@@ -1471,6 +1486,18 @@ EOF
 }
 
 cmd_disable_passwordless_stop() {
+    local auto_yes=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --yes|-y) auto_yes=true ;;
+            *)
+                echo "Usage: $0 disable-passwordless-stop [--yes]" >&2
+                return 1
+                ;;
+        esac
+        shift
+    done
+
     if [ ! -f "$SUDOERS_STOP_FILE" ]; then
         echo "Passwordless stop is already disabled."
         return 0
@@ -1482,7 +1509,10 @@ cmd_disable_passwordless_stop() {
 
     echo -e "${BLUE}Disable passwordless Stop Camera?${NC}"
     echo "This will remove: $SUDOERS_STOP_FILE"
-    read -r -p "Proceed? (y/N): " confirm
+    local confirm="y"
+    if [ "$auto_yes" != true ]; then
+        read -r -p "Proceed (remove sudoers rule)? (y/N): " confirm
+    fi
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         echo "Cancelled."
         return 0
@@ -2157,8 +2187,8 @@ case "$1" in
     logs)    cmd_logs "${2:-}" "${3:-}" ;;
     version) cmd_version ;;
     preset)  cmd_preset "${2:-}" ;;
-    enable-passwordless-stop) cmd_enable_passwordless_stop ;;
-    disable-passwordless-stop) cmd_disable_passwordless_stop ;;
+    enable-passwordless-stop) cmd_enable_passwordless_stop "${@:2}" ;;
+    disable-passwordless-stop) cmd_disable_passwordless_stop "${@:2}" ;;
     passwordless-stop-status) cmd_passwordless_stop_status ;;
     config)  cmd_config ;;
     update)  cmd_update "${@:2}" ;;
@@ -2169,6 +2199,8 @@ case "$1" in
         echo "       $0 start [--dry-run]"
         echo "       $0 logs [--path] [--sessions] [--follow|-f] [--tail N|-n N]"
         echo "       $0 preset {meeting|hq|low-latency}"
+        echo "       $0 enable-passwordless-stop [--yes]"
+        echo "       $0 disable-passwordless-stop [--yes]"
         echo "       $0 update [--check] [--yes] [--ref vX.Y.Z]"
         exit 1
         ;;

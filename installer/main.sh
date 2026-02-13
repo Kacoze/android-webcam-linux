@@ -161,6 +161,36 @@ install_runtime_scripts() {
   return "$rc"
 }
 
+maybe_enable_passwordless_stop() {
+  local ctl="$BIN_DIR/android-webcam-ctl"
+  [ -x "$ctl" ] || return 0
+
+  echo ""
+  log_info "Optional convenience: passwordless Stop Camera"
+  echo "This enables a narrow sudoers rule for v4l2loopback reload."
+  echo "You can always revert later with: android-webcam-ctl disable-passwordless-stop"
+
+  if [ "$AUTO_YES" = true ]; then
+    log_info "Skipping in non-interactive mode (--yes)."
+    echo "To enable later: android-webcam-ctl enable-passwordless-stop"
+    return 0
+  fi
+
+  local enable_now
+  prompt_read "Enable passwordless Stop Camera now (creates sudoers rule)? (Y/n): " enable_now
+  if [[ "$enable_now" == "n" || "$enable_now" == "N" ]]; then
+    log_info "Skipped. Stop may ask for sudo/polkit password."
+    return 0
+  fi
+
+  if "$ctl" enable-passwordless-stop --yes; then
+    log_success "Passwordless Stop Camera enabled."
+  else
+    log_warn "Could not enable passwordless stop automatically."
+    echo "Try manually: android-webcam-ctl enable-passwordless-stop"
+  fi
+}
+
 main() {
   setup_prompt_fd
 
@@ -207,6 +237,7 @@ main() {
   install_desktop_entries
 
   write_default_config
+  maybe_enable_passwordless_stop
 
   log_success "Installation complete."
   echo "Next steps:"
