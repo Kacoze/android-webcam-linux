@@ -41,9 +41,9 @@ jobs:
         shell: bash
         run: bash -n bootstrap.sh install.sh scripts/*.sh src/*
 
-      - name: Build installer from src (must be clean)
+      - name: Verify modular installer layout
         shell: bash
-        run: ./scripts/build-installer.sh && git diff --exit-code install.sh
+        run: test -f installer/main.sh && test -f installer/lib/assets.sh && test -f src/android-webcam-ctl
 
       - name: Verify installer checksum
         shell: bash

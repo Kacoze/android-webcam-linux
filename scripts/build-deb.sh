@@ -10,8 +10,12 @@ fi
 
 tag_or_version="${1:-}"
 if [ -z "$tag_or_version" ]; then
-  echo "Usage: $0 vX.Y.Z" >&2
-  exit 1
+  if [ -f "$REPO_ROOT/VERSION" ]; then
+    tag_or_version="v$(sed -n '1p' "$REPO_ROOT/VERSION" | tr -d '[:space:]')"
+  else
+    echo "Usage: $0 vX.Y.Z" >&2
+    exit 1
+  fi
 fi
 
 version="$tag_or_version"

@@ -36,9 +36,6 @@ jobs:
       - name: Install APT tooling
         run: sudo apt-get update && sudo apt-get install -y dpkg-dev apt-utils gnupg
 
-      - name: Build installer from src
-        run: ./scripts/build-installer.sh
-
       - name: Build Debian package
         run: ./scripts/build-deb.sh "${{ inputs.tag }}"
 

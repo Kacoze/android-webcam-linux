@@ -254,4 +254,10 @@ else
     exit 1
 fi
 
+export ANDROID_WEBCAM_REPO="$REPO"
+export ANDROID_WEBCAM_REF="$REF"
+if [[ "$REF" == v* ]]; then
+    export ANDROID_WEBCAM_VERSION="${REF#v}"
+fi
+
 exec bash "$install_file" "$@"

@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bo
 To pin a specific version/ref (recommended for reproducible installs):
 
 ```bash
-ANDROID_WEBCAM_REF="v1.0.2" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
+ANDROID_WEBCAM_REF="v1.1.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 
 ### Installation (Debian/Ubuntu .deb)
@@ -139,9 +139,10 @@ Optional signature verification:
 When `install.sh` changes, regenerate checksum before publishing:
 
 ```bash
-./scripts/build-installer.sh
 ./scripts/update-install-checksum.sh
 ```
+
+The installer is now modularized in `installer/main.sh` and `installer/lib/*.sh`; `install.sh` is a thin wrapper.
 
 CI verifies `install.sh.sha256` and fails if it is out of date.
 

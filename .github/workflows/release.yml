@@ -17,14 +17,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build installer from src
-        run: ./scripts/build-installer.sh
-
       - name: Update installer checksum
         run: ./scripts/update-install-checksum.sh
 
       - name: Bash syntax check
-        run: bash -n install.sh bootstrap.sh scripts/*.sh
+        run: bash -n install.sh bootstrap.sh installer/main.sh installer/lib/*.sh scripts/*.sh
+
+      - name: Verify version sync
+        run: ./scripts/check-version-sync.sh
 
       - name: Verify installer checksum
         run: ./scripts/verify-install-checksum.sh
@@ -69,5 +69,11 @@ jobs:
             install.sh.minisig
             install.sh.sha256.minisig
             minisign.pub
+            VERSION
+            installer/main.sh
+            installer/lib/*.sh
+            src/android-webcam-ctl
+            src/android-webcam-common
+            src/android-webcam-run-in-terminal
             dist/*.deb
             dist/*.deb.sha256
