@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bo
 To pin a specific version/ref (recommended for reproducible installs):
 
 ```bash
-ANDROID_WEBCAM_REF="v1.2.0" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
+ANDROID_WEBCAM_REF="v1.2.1" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 
 ### Installation (Debian/Ubuntu .deb)
@@ -181,7 +181,7 @@ Useful commands:
 
 ```bash
 android-webcam-ctl start --dry-run
-android-webcam-ctl repair
+android-webcam-ctl setup
 android-webcam-ctl preset meeting
 android-webcam-ctl logs
 ```

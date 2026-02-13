@@ -56,7 +56,7 @@ Terminal=false
 Type=Application
 Categories=Utility;Video;
 StartupWMClass=scrcpy
-Actions=Status;Config;Setup;Repair;Stop;Logs;
+Actions=Status;Config;Setup;Stop;Logs;
 
 [Desktop Action Status]
 Name=Check Status
@@ -73,12 +73,6 @@ Terminal=false
 [Desktop Action Setup]
 Name=Setup (fix)
 Exec=/usr/bin/android-webcam-run-in-terminal setup
-Path=/usr/bin
-Terminal=false
-
-[Desktop Action Repair]
-Name=Repair USB
-Exec=/usr/bin/android-webcam-run-in-terminal repair
 Path=/usr/bin
 Terminal=false
 

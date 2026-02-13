@@ -556,14 +556,14 @@ cmd_start() {
                 if ! adb_connect_with_retry "$PHONE_IP" 2; then
                     echo -e "${RED}Error:${NC} Auto-repair completed but reconnect still failed ($PHONE_IP:5555)."
                     notify_throttled "conn_failed_after_repair" 60 "critical" "Android Camera" "Naprawa USB zakonczona, ale polaczenie nadal nie dziala" "error"
-                    echo "Next: run '$0 repair'" >&2
+                    echo "Next: run '$0 setup'" >&2
                     return 12
                 fi
                 echo -e "${GREEN}USB auto-repair succeeded.${NC}"
             else
-                echo "Tip: connect USB and run '$0 repair' (or '$0 setup')."
-                notify_throttled "conn_failed" 60 "critical" "Android Camera" "Brak polaczenia. Podlacz USB i uruchom Repair" "error"
-                echo "Next: run '$0 repair'" >&2
+                echo "Tip: connect USB and run '$0 setup'."
+                notify_throttled "conn_failed" 60 "critical" "Android Camera" "Brak polaczenia. Podlacz USB i uruchom Setup" "error"
+                echo "Next: run '$0 setup'" >&2
                 return 12
             fi
         fi
@@ -1225,6 +1225,11 @@ cmd_fix() {
     if [ -z "$usb_device_id" ] && [ "$total_count" -gt 1 ] 2>/dev/null; then
         usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '[[:space:]]device$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
     fi
+
+    # Single device convenience: if exactly one authorized device is present, use it automatically.
+    if [ -z "$usb_device_id" ]; then
+        usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '[[:space:]]device$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+    fi
     
     # Final check: right before tcpip, re-read device list (may have changed since wait-for-usb)
     if [ -z "$usb_device_id" ]; then
@@ -1329,17 +1334,6 @@ cmd_fix() {
                 echo -e "${GREEN}Saved IP to config: $detected_ip${NC}"
         fi
     fi
-}
-
-cmd_repair() {
-    echo -e "${BLUE}Attempting USB repair...${NC}"
-    if repair_over_usb false; then
-        echo -e "${GREEN}Repair done. You can disconnect USB now and run: $0 start${NC}"
-        return 0
-    fi
-    echo -e "${RED}Repair failed.${NC}"
-    echo "Next: connect authorized USB device and run '$0 setup'"
-    return 1
 }
 
 cmd_status() {
@@ -1651,7 +1645,7 @@ cmd_doctor() {
         action_add "Ensure v4l2loopback is loaded (default sink /dev/video10): sudo modprobe v4l2loopback"
     fi
     if [ "$need_pair" = true ]; then
-        action_add "Connect USB and run: android-webcam-ctl repair (or setup)"
+        action_add "Connect USB and run: android-webcam-ctl setup"
     fi
     if [ "$need_video_group" = true ]; then
         action_add "Add user to video group: sudo usermod -aG video $USER (then log out/in)"
@@ -1687,7 +1681,7 @@ cmd_doctor() {
         if [ "$fails" -gt 0 ]; then
             echo "Suggested quick fixes:"
             echo "- Re-run installer: curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash"
-            echo "- Repair over USB: android-webcam-ctl repair"
+            echo "- Repair over USB: android-webcam-ctl setup (Setup fix)"
             echo "- If v4l2 sink missing (default /dev/video10): sudo modprobe v4l2loopback"
         elif [ "$warns" -gt 0 ]; then
             echo "Warnings detected. Camera may still work, but reliability can be reduced."
@@ -1843,7 +1837,6 @@ case "$1" in
     toggle)  cmd_toggle ;;
     setup)   cmd_fix ;;
     fix)     cmd_fix ;;  # backward compatibility
-    repair)  cmd_repair ;;
     status)  cmd_status ;;
     doctor)  cmd_doctor "${2:-}" ;;
     logs)    cmd_logs "${2:-}" "${3:-}" ;;
@@ -1852,7 +1845,7 @@ case "$1" in
     config)  cmd_config ;;
     uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|setup|repair|status|doctor|logs|version|preset|config|uninstall}"
+        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|preset|config|uninstall}"
         echo "       $0 doctor [--json]"
         echo "       $0 start [--dry-run]"
         echo "       $0 logs [--path] [--sessions] [--follow|-f] [--tail N|-n N]"

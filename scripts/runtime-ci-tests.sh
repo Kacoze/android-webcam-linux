@@ -205,8 +205,8 @@ set -e
 expect_rc 16 "$rc" "payload missing"
 grep -q "scrcpy server payload is missing" "$CI_DIR/payload-missing.txt"
 
-# 6) repair succeeds with USB device and writes endpoint/serial
-home6=$(mk_test_home "repair")
+# 6) setup succeeds with USB device and writes endpoint/serial
+home6=$(mk_test_home "setup")
 sink6="$home6/video10"
 touch "$sink6"
 touch "$home6/.local/bin/scrcpy-server"
@@ -237,6 +237,11 @@ case "${1:-}" in
     ;;
   disconnect)
     ;;
+  shell)
+    if [ "${2:-}" = "-4" ] || [ "${2:-}" = "ip" ]; then
+      echo "2: wlan0    inet 192.168.1.77/24 brd 192.168.1.255 scope global wlan0"
+    fi
+    ;;
   wait-for-usb-device)
     ;;
 esac
@@ -245,10 +250,10 @@ EOF
 chmod +x "$home6/.local/bin/adb"
 
 set +e
-run_cmd "$home6" "$RUNTIME_DIR/android-webcam-ctl" repair > "$CI_DIR/repair.txt"
+run_cmd "$home6" "$RUNTIME_DIR/android-webcam-ctl" setup > "$CI_DIR/setup.txt"
 rc=$?
 set -e
-expect_rc 0 "$rc" "repair success"
+expect_rc 0 "$rc" "setup success"
 grep -q 'DEFAULT_DEVICE_SERIAL="usb-serial-01"' "$home6/.config/android-webcam/settings.conf"
 grep -q 'LAST_WORKING_ENDPOINT="192.168.1.77:5555"' "$home6/.config/android-webcam/settings.conf"
 

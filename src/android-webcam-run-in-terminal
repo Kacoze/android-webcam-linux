@@ -7,9 +7,8 @@ case "${1:-}" in
     status)  CMD="$CTL status; read -r -p \"Press Enter to close...\"; exec bash" ;;
     config)  CMD="$CTL config" ;;
     setup)   CMD="$CTL setup" ;;
-    repair)  CMD="$CTL repair; read -r -p \"Press Enter to close...\"; exec bash" ;;
     logs)    CMD="$CTL logs; read -r -p \"Press Enter to close...\"; exec bash" ;;
-    *)       echo "Usage: $0 {status|config|setup|repair|logs}" >&2; exit 1 ;;
+    *)       echo "Usage: $0 {status|config|setup|logs}" >&2; exit 1 ;;
 esac
 
 run_in_term() {
