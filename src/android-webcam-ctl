@@ -2014,6 +2014,36 @@ cmd_config() {
     "$editor" "$CONFIG_FILE"
 }
 
+version_is_simple_semver() {
+    local v="${1:-}"
+    [[ "$v" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]
+}
+
+version_lt_sortv() {
+    local a="${1:-}"
+    local b="${2:-}"
+    [ "$a" != "$b" ] && [ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)" = "$a" ]
+}
+
+resolve_latest_release_tag_for_update() {
+    local repo="${ANDROID_WEBCAM_REPO:-Kacoze/android-webcam-linux}"
+    local api_url="https://api.github.com/repos/${repo}/releases/latest"
+    local json=""
+
+    if command -v curl >/dev/null 2>&1; then
+        json=$(curl -fsSL "$api_url" 2>/dev/null || true)
+    elif command -v wget >/dev/null 2>&1; then
+        json=$(wget -qO - "$api_url" 2>/dev/null || true)
+    fi
+
+    if [ -z "$json" ]; then
+        echo ""
+        return 0
+    fi
+
+    echo "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]\+\)".*/\1/p' | sed -n '1p'
+}
+
 cmd_update() {
     local check_only=false
     local assume_yes=false
@@ -2062,8 +2092,22 @@ cmd_update() {
     echo "Detected install mode: $install_mode"
 
     if [ "$install_mode" = "apt" ]; then
+        local apt_update_required="unknown"
+        if command -v apt >/dev/null 2>&1; then
+            if apt list --upgradable 2>/dev/null | grep -q '^android-webcam-linux/'; then
+                apt_update_required="yes"
+            else
+                apt_update_required="no"
+            fi
+        fi
+        echo "Update required: $apt_update_required"
+
         local apt_cmd="sudo apt update && sudo apt install --only-upgrade android-webcam-linux"
         echo "Would run: $apt_cmd"
+        if [ "$apt_update_required" = "no" ]; then
+            echo "Already up to date (based on local apt cache)."
+            return 0
+        fi
         if [ "$check_only" = true ]; then
             return 0
         fi
@@ -2071,18 +2115,49 @@ cmd_update() {
             echo -e "${RED}Error:${NC} sudo is required for apt update"
             return 1
         fi
-        sudo apt update && sudo apt install --only-upgrade android-webcam-linux
+        if ! sudo apt update; then
+            return 1
+        fi
+        if command -v apt >/dev/null 2>&1 && ! apt list --upgradable 2>/dev/null | grep -q '^android-webcam-linux/'; then
+            echo "Already up to date."
+            return 0
+        fi
+        sudo apt install --only-upgrade android-webcam-linux
         return $?
     fi
 
     if [ "$install_mode" = "pacman" ]; then
+        local pacman_update_required="unknown"
+        if command -v yay >/dev/null 2>&1; then
+            if yay -Qua 2>/dev/null | grep -q '^android-webcam-linux[[:space:]]'; then
+                pacman_update_required="yes"
+            else
+                pacman_update_required="no"
+            fi
+        elif command -v paru >/dev/null 2>&1; then
+            if paru -Qua 2>/dev/null | grep -q '^android-webcam-linux[[:space:]]'; then
+                pacman_update_required="yes"
+            else
+                pacman_update_required="no"
+            fi
+        fi
+        echo "Update required: $pacman_update_required"
+
         if command -v yay >/dev/null 2>&1; then
             if [ "$assume_yes" = true ]; then
                 echo "Would run: yay -Syu --noconfirm android-webcam-linux"
+                if [ "$pacman_update_required" = "no" ]; then
+                    echo "Already up to date."
+                    return 0
+                fi
                 [ "$check_only" = true ] && return 0
                 yay -Syu --noconfirm android-webcam-linux
             else
                 echo "Would run: yay -Syu android-webcam-linux"
+                if [ "$pacman_update_required" = "no" ]; then
+                    echo "Already up to date."
+                    return 0
+                fi
                 [ "$check_only" = true ] && return 0
                 yay -Syu android-webcam-linux
             fi
@@ -2091,10 +2166,18 @@ cmd_update() {
         if command -v paru >/dev/null 2>&1; then
             if [ "$assume_yes" = true ]; then
                 echo "Would run: paru -Syu --noconfirm android-webcam-linux"
+                if [ "$pacman_update_required" = "no" ]; then
+                    echo "Already up to date."
+                    return 0
+                fi
                 [ "$check_only" = true ] && return 0
                 paru -Syu --noconfirm android-webcam-linux
             else
                 echo "Would run: paru -Syu android-webcam-linux"
+                if [ "$pacman_update_required" = "no" ]; then
+                    echo "Already up to date."
+                    return 0
+                fi
                 [ "$check_only" = true ] && return 0
                 paru -Syu android-webcam-linux
             fi
@@ -2108,6 +2191,27 @@ cmd_update() {
         return 1
     fi
 
+    local target_ref=""
+    local target_version=""
+    local script_update_required="unknown"
+    if [ -n "$ref" ]; then
+        target_ref="$ref"
+    else
+        target_ref=$(resolve_latest_release_tag_for_update)
+    fi
+    if [ -n "$target_ref" ]; then
+        target_version="${target_ref#v}"
+        echo "Target version: $target_version"
+    fi
+    if version_is_simple_semver "$current_version" && version_is_simple_semver "$target_version"; then
+        if version_lt_sortv "$current_version" "$target_version"; then
+            script_update_required="yes"
+        else
+            script_update_required="no"
+        fi
+    fi
+    echo "Update required: $script_update_required"
+
     local bootstrap_url="${ANDROID_WEBCAM_UPDATE_BOOTSTRAP_URL:-https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh}"
     local tmp
     tmp=$(mktemp)
@@ -2117,6 +2221,10 @@ cmd_update() {
     fi
 
     echo "Would run: bootstrap installer from $bootstrap_url"
+    if [ "$script_update_required" = "no" ]; then
+        echo "Already up to date."
+        return 0
+    fi
     if [ "$check_only" = true ]; then
         return 0
     fi
