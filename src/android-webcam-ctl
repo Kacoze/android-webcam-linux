@@ -963,6 +963,13 @@ Or reboot your system." 2>/dev/null || true
     if [ ! -z "$PID" ]; then
         mkdir -p "$CONFIG_DIR"
         echo "$PID" > "$PID_FILE" 2>/dev/null || true
+        # Watch for external app termination (e.g., desktop "Quit") and run post-stop cleanup.
+        if command -v nohup >/dev/null 2>&1; then
+            nohup "$0" __post-stop-cleanup "$PID" >/dev/null 2>&1 &
+        else
+            "$0" __post-stop-cleanup "$PID" >/dev/null 2>&1 &
+            disown 2>/dev/null || true
+        fi
     fi
     
     sleep 3
@@ -1027,61 +1034,9 @@ cmd_stop() {
         fi
     fi
 
-    # Reload v4l2loopback so device is in clean state for next start (fixes Meet/Zoom not seeing camera after stop+start)
+    # Reload v4l2loopback and optional ADB USB hygiene so next start is reliable.
     if $was_running; then
-        load_config 2>/dev/null || true
-        reload_opt="${RELOAD_V4L2_ON_STOP:-true}"
-        reload_lower=$(echo "$reload_opt" | tr '[:upper:]' '[:lower:]')
-        if [[ "$reload_lower" != "false" && "$reload_lower" != "0" && "$reload_lower" != "no" ]]; then
-            if lsmod 2>/dev/null | grep -q v4l2loopback; then
-                local reload_ok=false
-                local modprobe_bin
-                modprobe_bin=$(resolve_modprobe_bin)
-                # Give scrcpy time to fully release /dev/video10 before unloading module
-                sleep 2
-                if [ -n "$modprobe_bin" ] && command -v sudo >/dev/null 2>&1; then
-                    if run_v4l2_reload_with_passwordless_sudo "$modprobe_bin"; then
-                        reload_ok=true
-                    fi
-                fi
-
-                # If passwordless mode is not configured, ask for authentication and perform reload.
-                if [ "$reload_ok" = false ]; then
-                    echo -e "${YELLOW}Module reload needs administrator privileges.${NC}"
-                    echo "You can enable passwordless stop with: $0 enable-passwordless-stop"
-                    if command -v pkexec >/dev/null 2>&1 && [ -n "$modprobe_bin" ]; then
-                        if pkexec sh -c "'$modprobe_bin' -r v4l2loopback 2>/dev/null; '$modprobe_bin' v4l2loopback" 2>/dev/null; then
-                            reload_ok=true
-                        fi
-                    fi
-                fi
-                if [ "$reload_ok" = false ] && command -v sudo >/dev/null 2>&1 && [ -n "$modprobe_bin" ]; then
-                    echo -e "${BLUE}Sudo password may be required to reload v4l2loopback.${NC}"
-                    if sudo "$modprobe_bin" -r v4l2loopback 2>/dev/null; then
-                        sudo "$modprobe_bin" v4l2loopback 2>/dev/null && reload_ok=true
-                    else
-                        # module may be busy or already unloaded; still try load
-                        sudo "$modprobe_bin" v4l2loopback 2>/dev/null && reload_ok=true
-                    fi
-                fi
-                if [ "$reload_ok" = true ]; then
-                    sleep 1
-                else
-                    notify "normal" "Android Camera" "Could not reload video module. Meet/Zoom may not detect camera next time. You can enable passwordless stop: android-webcam-ctl enable-passwordless-stop" "dialog-warning"
-                fi
-            fi
-        fi
-
-        # Optional security hygiene: switch back to USB mode when USB device is connected.
-        local disable_wifi
-        disable_wifi=$(echo "${DISABLE_ADB_WIFI_ON_STOP:-false}" | tr '[:upper:]' '[:lower:]')
-        if [[ "$disable_wifi" == "true" || "$disable_wifi" == "1" || "$disable_wifi" == "yes" ]]; then
-            local usb_serial=""
-            usb_serial=$(select_usb_device || true)
-            if [ -n "$usb_serial" ]; then
-                adb -s "$usb_serial" usb >/dev/null 2>&1 || true
-            fi
-        fi
+        run_post_stop_cleanup true
     fi
 
     if $was_running; then
@@ -1090,6 +1045,90 @@ cmd_stop() {
     else
         echo "Not running."
     fi
+}
+
+run_post_stop_cleanup() {
+    local interactive="${1:-true}"
+
+    load_config 2>/dev/null || true
+    local reload_opt reload_lower
+    reload_opt="${RELOAD_V4L2_ON_STOP:-true}"
+    reload_lower=$(echo "$reload_opt" | tr '[:upper:]' '[:lower:]')
+    if [[ "$reload_lower" != "false" && "$reload_lower" != "0" && "$reload_lower" != "no" ]]; then
+        if lsmod 2>/dev/null | grep -q v4l2loopback; then
+            local reload_ok=false
+            local modprobe_bin
+            modprobe_bin=$(resolve_modprobe_bin)
+            # Give scrcpy time to fully release /dev/video10 before unloading module
+            sleep 2
+            if [ -n "$modprobe_bin" ] && command -v sudo >/dev/null 2>&1; then
+                if run_v4l2_reload_with_passwordless_sudo "$modprobe_bin"; then
+                    reload_ok=true
+                fi
+            fi
+
+            # If passwordless mode is not configured, ask for authentication and perform reload.
+            if [ "$reload_ok" = false ] && [ "$interactive" = true ]; then
+                echo -e "${YELLOW}Module reload needs administrator privileges.${NC}"
+                echo "You can enable passwordless stop with: $0 enable-passwordless-stop"
+                if command -v pkexec >/dev/null 2>&1 && [ -n "$modprobe_bin" ]; then
+                    if pkexec sh -c "'$modprobe_bin' -r v4l2loopback 2>/dev/null; '$modprobe_bin' v4l2loopback" 2>/dev/null; then
+                        reload_ok=true
+                    fi
+                fi
+            fi
+            if [ "$reload_ok" = false ] && command -v sudo >/dev/null 2>&1 && [ -n "$modprobe_bin" ] && [ "$interactive" = true ]; then
+                echo -e "${BLUE}Sudo password may be required to reload v4l2loopback.${NC}"
+                if sudo "$modprobe_bin" -r v4l2loopback 2>/dev/null; then
+                    sudo "$modprobe_bin" v4l2loopback 2>/dev/null && reload_ok=true
+                else
+                    # module may be busy or already unloaded; still try load
+                    sudo "$modprobe_bin" v4l2loopback 2>/dev/null && reload_ok=true
+                fi
+            fi
+            if [ "$reload_ok" = true ]; then
+                sleep 1
+            elif [ "$interactive" = true ]; then
+                notify "normal" "Android Camera" "Could not reload video module. Meet/Zoom may not detect camera next time. You can enable passwordless stop: android-webcam-ctl enable-passwordless-stop" "dialog-warning"
+            fi
+        fi
+    fi
+
+    # Optional security hygiene: switch back to USB mode when USB device is connected.
+    local disable_wifi
+    disable_wifi=$(echo "${DISABLE_ADB_WIFI_ON_STOP:-false}" | tr '[:upper:]' '[:lower:]')
+    if [[ "$disable_wifi" == "true" || "$disable_wifi" == "1" || "$disable_wifi" == "yes" ]]; then
+        local usb_serial=""
+        usb_serial=$(select_usb_device || true)
+        if [ -n "$usb_serial" ]; then
+            adb -s "$usb_serial" usb >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
+cmd_post_stop_cleanup() {
+    local watched_pid="${1:-}"
+    if [ -z "$watched_pid" ]; then
+        return 1
+    fi
+
+    # Wait until watched process exits.
+    while kill -0 "$watched_pid" 2>/dev/null; do
+        sleep 1
+    done
+
+    # Run cleanup only when this is still the tracked camera process and it exited outside cmd_stop.
+    if [ ! -f "$PID_FILE" ]; then
+        return 0
+    fi
+    local tracked_pid
+    read -r tracked_pid < "$PID_FILE" 2>/dev/null || true
+    if [ "$tracked_pid" != "$watched_pid" ]; then
+        return 0
+    fi
+    rm -f "$PID_FILE" 2>/dev/null || true
+    # Use interactive cleanup here so pkexec can still ask for GUI auth when needed.
+    run_post_stop_cleanup true
 }
 
 cmd_toggle() {
@@ -2192,6 +2231,7 @@ case "$1" in
     passwordless-stop-status) cmd_passwordless_stop_status ;;
     config)  cmd_config ;;
     update)  cmd_update "${@:2}" ;;
+    __post-stop-cleanup) cmd_post_stop_cleanup "${2:-}" ;;
     uninstall) cmd_uninstall ;;
     *)
         echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|preset|enable-passwordless-stop|disable-passwordless-stop|passwordless-stop-status|config|update|uninstall}"
