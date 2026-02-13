@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-02-13
+
+- `android-webcam-ctl update` now checks whether an update is actually needed before running upgrade steps.
+- Added up-to-date detection for apt, AUR helpers (yay/paru), and script installs (version comparison with latest tag or `--ref`).
+
 ## [1.2.6] - 2026-02-13
 
 - Added automatic post-stop cleanup when camera is closed via window/system "Quit" action.
