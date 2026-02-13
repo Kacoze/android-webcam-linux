@@ -242,7 +242,7 @@ File location: `~/.config/android-webcam/settings.conf`
 
 ```bash
 PHONE_IP="192.168.1.50"   # Your phone's Wi-Fi IP address
-CAMERA_FACING="back"      # Options: front, back, external
+CAMERA_FACING="front"      # Options: front, back, external
 VIDEO_SIZE=""             # Max dimension in pixels (e.g., "1080" for 1080p), leave empty for max resolution
 BIT_RATE="8M"             # Higher = better quality, more latency
 EXTRA_ARGS="--no-audio --v4l2-buffer=400"  # Additional scrcpy arguments
@@ -255,7 +255,7 @@ RELOAD_V4L2_ON_STOP="true"  # true = reload v4l2loopback when stopping (so Meet/
 **High Quality (1080p, 12Mbps):**
 ```bash
 PHONE_IP="192.168.1.50"
-CAMERA_FACING="back"
+CAMERA_FACING="front"
 VIDEO_SIZE="1080"
 BIT_RATE="12M"
 EXTRA_ARGS="--no-audio --v4l2-buffer=400"
@@ -264,7 +264,7 @@ EXTRA_ARGS="--no-audio --v4l2-buffer=400"
 **Low Latency (720p, 4Mbps):**
 ```bash
 PHONE_IP="192.168.1.50"
-CAMERA_FACING="back"
+CAMERA_FACING="front"
 VIDEO_SIZE="720"
 BIT_RATE="4M"
 EXTRA_ARGS="--no-audio --v4l2-buffer=200"
@@ -282,7 +282,7 @@ EXTRA_ARGS="--no-audio --v4l2-buffer=400"
 **Maximum Quality (No Resolution Limit):**
 ```bash
 PHONE_IP="192.168.1.50"
-CAMERA_FACING="back"
+CAMERA_FACING="front"
 VIDEO_SIZE=""              # Empty = maximum supported resolution
 BIT_RATE="16M"             # High bitrate for best quality
 EXTRA_ARGS="--no-audio --v4l2-buffer=400"
@@ -291,7 +291,7 @@ EXTRA_ARGS="--no-audio --v4l2-buffer=400"
 **Run without camera window (headless):**
 ```bash
 PHONE_IP="192.168.1.50"
-CAMERA_FACING="back"
+CAMERA_FACING="front"
 VIDEO_SIZE=""
 BIT_RATE="8M"
 EXTRA_ARGS="--no-audio --v4l2-buffer=400"

@@ -14,7 +14,7 @@ PID_FILE="$CONFIG_DIR/scrcpy.pid"
 V4L2_SINK_OVERRIDE="${ANDROID_WEBCAM_V4L2_SINK:-}"
 
 # Default configuration values
-DEFAULT_CAMERA_FACING="back" # front, back, external
+DEFAULT_CAMERA_FACING="front" # front, back, external
 DEFAULT_VIDEO_SIZE=""        # e.g. 1080 (max dimension in pixels, empty = max supported)
 DEFAULT_BIT_RATE="8M"
 DEFAULT_ARGS="--no-audio --v4l2-buffer=400"
@@ -1330,7 +1330,7 @@ cmd_fix() {
             fi
         else
             mkdir -p "$CONFIG_DIR"
-            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\nSHOW_WINDOW="true"\nRELOAD_V4L2_ON_STOP="true"\nV4L2_SINK="/dev/video10"\nDEFAULT_DEVICE_SERIAL="%s"\nLAST_WORKING_ENDPOINT="%s:5555"\nDISABLE_ADB_WIFI_ON_STOP="false"\nPRESET="meeting"\n' "$detected_ip" "${usb_device_id:-}" "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
+            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="front"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\nSHOW_WINDOW="true"\nRELOAD_V4L2_ON_STOP="true"\nV4L2_SINK="/dev/video10"\nDEFAULT_DEVICE_SERIAL="%s"\nLAST_WORKING_ENDPOINT="%s:5555"\nDISABLE_ADB_WIFI_ON_STOP="false"\nPRESET="meeting"\n' "$detected_ip" "${usb_device_id:-}" "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
                 echo -e "${GREEN}Saved IP to config: $detected_ip${NC}"
         fi
     fi

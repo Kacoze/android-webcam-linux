@@ -70,7 +70,7 @@ write_default_config() {
     cat > "$CONFIG_FILE" <<'EOF'
 # Android Webcam Configuration
 PHONE_IP=""
-CAMERA_FACING="back"
+CAMERA_FACING="front"
 VIDEO_SIZE=""
 BIT_RATE="8M"
 EXTRA_ARGS="--no-audio --v4l2-buffer=400"

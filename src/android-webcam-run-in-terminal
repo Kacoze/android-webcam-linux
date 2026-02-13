@@ -4,10 +4,10 @@
 set -e
 CTL="$(command -v android-webcam-ctl 2>/dev/null || echo /usr/local/bin/android-webcam-ctl)"
 case "${1:-}" in
-    status)  CMD="$CTL status; read -r -p \"Press Enter to close...\"; exec bash" ;;
+    status)  CMD="$CTL status; read -r -p \"Press Enter to close...\" _" ;;
     config)  CMD="$CTL config" ;;
     setup)   CMD="$CTL setup" ;;
-    logs)    CMD="$CTL logs; read -r -p \"Press Enter to close...\"; exec bash" ;;
+    logs)    CMD="$CTL logs; read -r -p \"Press Enter to close...\" _" ;;
     *)       echo "Usage: $0 {status|config|setup|logs}" >&2; exit 1 ;;
 esac
 
