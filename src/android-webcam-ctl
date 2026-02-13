@@ -1945,6 +1945,142 @@ cmd_config() {
     "$editor" "$CONFIG_FILE"
 }
 
+cmd_update() {
+    local check_only=false
+    local assume_yes=false
+    local ref=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --check)
+                check_only=true
+                ;;
+            --yes|-y)
+                assume_yes=true
+                ;;
+            --ref)
+                shift
+                ref="${1:-}"
+                if [ -z "$ref" ]; then
+                    echo "Usage: $0 update [--check] [--yes] [--ref vX.Y.Z]" >&2
+                    return 1
+                fi
+                ;;
+            *)
+                echo "Usage: $0 update [--check] [--yes] [--ref vX.Y.Z]" >&2
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    local current_version
+    current_version="$(cmd_version 2>/dev/null || echo unknown)"
+
+    local install_mode="script"
+    if command -v dpkg-query >/dev/null 2>&1; then
+        if dpkg-query -W -f='${Status}' android-webcam-linux 2>/dev/null | grep -q "install ok installed"; then
+            install_mode="apt"
+        fi
+    fi
+    if [ "$install_mode" = "script" ] && command -v pacman >/dev/null 2>&1; then
+        if pacman -Q android-webcam-linux >/dev/null 2>&1; then
+            install_mode="pacman"
+        fi
+    fi
+
+    echo "Current version: $current_version"
+    echo "Detected install mode: $install_mode"
+
+    if [ "$install_mode" = "apt" ]; then
+        local apt_cmd="sudo apt update && sudo apt install --only-upgrade android-webcam-linux"
+        echo "Would run: $apt_cmd"
+        if [ "$check_only" = true ]; then
+            return 0
+        fi
+        if ! command -v sudo >/dev/null 2>&1; then
+            echo -e "${RED}Error:${NC} sudo is required for apt update"
+            return 1
+        fi
+        sudo apt update && sudo apt install --only-upgrade android-webcam-linux
+        return $?
+    fi
+
+    if [ "$install_mode" = "pacman" ]; then
+        if command -v yay >/dev/null 2>&1; then
+            if [ "$assume_yes" = true ]; then
+                echo "Would run: yay -Syu --noconfirm android-webcam-linux"
+                [ "$check_only" = true ] && return 0
+                yay -Syu --noconfirm android-webcam-linux
+            else
+                echo "Would run: yay -Syu android-webcam-linux"
+                [ "$check_only" = true ] && return 0
+                yay -Syu android-webcam-linux
+            fi
+            return $?
+        fi
+        if command -v paru >/dev/null 2>&1; then
+            if [ "$assume_yes" = true ]; then
+                echo "Would run: paru -Syu --noconfirm android-webcam-linux"
+                [ "$check_only" = true ] && return 0
+                paru -Syu --noconfirm android-webcam-linux
+            else
+                echo "Would run: paru -Syu android-webcam-linux"
+                [ "$check_only" = true ] && return 0
+                paru -Syu android-webcam-linux
+            fi
+            return $?
+        fi
+        echo "Would run: use your AUR helper (yay/paru) to upgrade android-webcam-linux"
+        if [ "$check_only" = true ]; then
+            return 0
+        fi
+        echo -e "${RED}Error:${NC} pacman package detected, but no AUR helper (yay/paru) found."
+        return 1
+    fi
+
+    local bootstrap_url="${ANDROID_WEBCAM_UPDATE_BOOTSTRAP_URL:-https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh}"
+    local tmp
+    tmp=$(mktemp)
+    local update_args=()
+    if [ "$assume_yes" = true ]; then
+        update_args+=("--yes")
+    fi
+
+    echo "Would run: bootstrap installer from $bootstrap_url"
+    if [ "$check_only" = true ]; then
+        return 0
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsSL "$bootstrap_url" -o "$tmp"; then
+            rm -f "$tmp"
+            echo -e "${RED}Error:${NC} failed to download bootstrap script"
+            return 1
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -qO "$tmp" "$bootstrap_url"; then
+            rm -f "$tmp"
+            echo -e "${RED}Error:${NC} failed to download bootstrap script"
+            return 1
+        fi
+    else
+        rm -f "$tmp"
+        echo -e "${RED}Error:${NC} curl or wget is required"
+        return 1
+    fi
+
+    chmod 0755 "$tmp"
+    export ANDROID_WEBCAM_STABLE_ONLY="${ANDROID_WEBCAM_STABLE_ONLY:-1}"
+    if [ -n "$ref" ]; then
+        export ANDROID_WEBCAM_REF="$ref"
+    fi
+    bash "$tmp" "${update_args[@]}"
+    local rc=$?
+    rm -f "$tmp"
+    return "$rc"
+}
+
 cmd_uninstall() {
     echo -e "${RED}!!! WARNING !!!${NC}"
     echo "This will remove configuration files, icons, and control scripts."
@@ -2025,13 +2161,15 @@ case "$1" in
     disable-passwordless-stop) cmd_disable_passwordless_stop ;;
     passwordless-stop-status) cmd_passwordless_stop_status ;;
     config)  cmd_config ;;
+    update)  cmd_update "${@:2}" ;;
     uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|preset|enable-passwordless-stop|disable-passwordless-stop|passwordless-stop-status|config|uninstall}"
+        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|preset|enable-passwordless-stop|disable-passwordless-stop|passwordless-stop-status|config|update|uninstall}"
         echo "       $0 doctor [--json]"
         echo "       $0 start [--dry-run]"
         echo "       $0 logs [--path] [--sessions] [--follow|-f] [--tail N|-n N]"
         echo "       $0 preset {meeting|hq|low-latency}"
+        echo "       $0 update [--check] [--yes] [--ref vX.Y.Z]"
         exit 1
         ;;
 esac

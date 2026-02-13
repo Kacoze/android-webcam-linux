@@ -190,6 +190,7 @@ android-webcam-ctl start --dry-run
 android-webcam-ctl setup
 android-webcam-ctl preset meeting
 android-webcam-ctl logs
+android-webcam-ctl update --check
 ```
 
 ### 2. Application Examples
@@ -222,6 +223,7 @@ Right-click the **Camera Phone** icon to access:
 - **Check Status**: See if the camera is running and check current settings. A terminal window opens; press Enter to close it.
 - **Settings**: Opening the configuration file allows you to change back/front camera, resolution, etc.
 - **Setup (fix)**: Quick access to USB re-pairing tool.
+- **Update**: Run updater from a terminal action.
 
 When the camera runs without a window (headless), the dock usually does not show that it is active. Use **Check Status** to confirm it is running, or **Stop Camera** when you are done.
 

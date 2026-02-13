@@ -16,7 +16,7 @@ Terminal=false
 Type=Application
 Categories=Utility;Video;
 StartupWMClass=scrcpy
-Actions=Status;Config;Setup;Stop;Logs;
+Actions=Status;Config;Setup;Stop;Logs;Update;
 
 [Desktop Action Status]
 Name=Check Status
@@ -45,6 +45,12 @@ Terminal=false
 [Desktop Action Logs]
 Name=Show Logs
 Exec=/usr/local/bin/android-webcam-run-in-terminal logs
+Path=/usr/local/bin
+Terminal=false
+
+[Desktop Action Update]
+Name=Update
+Exec=/usr/local/bin/android-webcam-run-in-terminal update
 Path=/usr/local/bin
 Terminal=false
 EOF

@@ -350,4 +350,15 @@ set -e
 expect_rc 0 "$rc" "stop fallback rc"
 grep -q "Sudo password may be required" "$CI_DIR/stop-fallback.txt"
 
+# 10) update check mode prints detected path and exits cleanly
+home9=$(mk_test_home "update-check")
+set +e
+run_cmd "$home9" "$RUNTIME_DIR/android-webcam-ctl" update --check > "$CI_DIR/update-check.txt"
+rc=$?
+set -e
+expect_rc 0 "$rc" "update --check"
+grep -q "Current version" "$CI_DIR/update-check.txt"
+grep -q "Detected install mode" "$CI_DIR/update-check.txt"
+grep -q "Would run" "$CI_DIR/update-check.txt"
+
 echo "Runtime CI tests passed."

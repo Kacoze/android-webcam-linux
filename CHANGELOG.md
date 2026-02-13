@@ -6,6 +6,9 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+- Added `android-webcam-ctl update` command with `--check` / `--yes` / `--ref` options.
+- Added desktop menu action `Update` (right-click on Camera Phone icon).
+
 ## [1.2.3] - 2026-02-13
 
 - Added optional passwordless Stop via a narrow sudoers rule for reloading `v4l2loopback`.

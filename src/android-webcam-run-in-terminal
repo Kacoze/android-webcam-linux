@@ -8,7 +8,8 @@ case "${1:-}" in
     config)  CMD="$CTL config" ;;
     setup)   CMD="$CTL setup" ;;
     logs)    CMD="$CTL logs; read -r -p \"Press Enter to close...\" _" ;;
-    *)       echo "Usage: $0 {status|config|setup|logs}" >&2; exit 1 ;;
+    update)  CMD="$CTL update; read -r -p \"Press Enter to close...\" _" ;;
+    *)       echo "Usage: $0 {status|config|setup|logs|update}" >&2; exit 1 ;;
 esac
 
 run_in_term() {
