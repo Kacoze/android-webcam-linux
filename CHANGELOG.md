@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-02-13
+
+- Added USB-first convenience features: `repair` command and automatic USB repair fallback in `start`.
+- Added multi-device preference via `DEFAULT_DEVICE_SERIAL` and persisted `LAST_WORKING_ENDPOINT`.
+- Added notification throttling and `doctor --json` field `top_action`.
+- Added presets command (`preset meeting|hq|low-latency`) and status visibility of active profile/device state.
+- Added optional security hygiene on stop via `DISABLE_ADB_WIFI_ON_STOP`.
+- Added desktop/menu Repair action across installer, .deb and AUR templates.
+
 ## [1.1.1] - 2026-02-13
 
 - Fixed installer cleanup bug causing `tmp: unbound variable` after successful install.

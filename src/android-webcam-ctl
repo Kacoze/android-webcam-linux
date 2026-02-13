@@ -20,6 +20,8 @@ DEFAULT_BIT_RATE="8M"
 DEFAULT_ARGS="--no-audio --v4l2-buffer=400"
 DEFAULT_RELOAD_V4L2_ON_STOP="true"
 DEFAULT_V4L2_SINK="/dev/video10"
+DEFAULT_DISABLE_ADB_WIFI_ON_STOP="false"
+DEFAULT_PRESET="meeting"
 
 # Initial sink value (may be overridden by config/env later)
 V4L2_SINK="$DEFAULT_V4L2_SINK"
@@ -171,6 +173,10 @@ EXTRA_ARGS="$DEFAULT_ARGS"
 SHOW_WINDOW="true"
 RELOAD_V4L2_ON_STOP="$DEFAULT_RELOAD_V4L2_ON_STOP"
 V4L2_SINK="$DEFAULT_V4L2_SINK"
+DEFAULT_DEVICE_SERIAL=""
+LAST_WORKING_ENDPOINT=""
+DISABLE_ADB_WIFI_ON_STOP="$DEFAULT_DISABLE_ADB_WIFI_ON_STOP"
+PRESET="$DEFAULT_PRESET"
 END_CONF
     fi
     
@@ -186,6 +192,10 @@ EXTRA_ARGS="$DEFAULT_ARGS"
 SHOW_WINDOW="true"
 RELOAD_V4L2_ON_STOP="$DEFAULT_RELOAD_V4L2_ON_STOP"
 V4L2_SINK="$DEFAULT_V4L2_SINK"
+DEFAULT_DEVICE_SERIAL=""
+LAST_WORKING_ENDPOINT=""
+DISABLE_ADB_WIFI_ON_STOP="$DEFAULT_DISABLE_ADB_WIFI_ON_STOP"
+PRESET="$DEFAULT_PRESET"
 END_CONF
     fi
 
@@ -197,6 +207,10 @@ END_CONF
     # Default for existing configs without SHOW_WINDOW or RELOAD_V4L2_ON_STOP
     SHOW_WINDOW="${SHOW_WINDOW:-true}"
     RELOAD_V4L2_ON_STOP="${RELOAD_V4L2_ON_STOP:-$DEFAULT_RELOAD_V4L2_ON_STOP}"
+    DEFAULT_DEVICE_SERIAL="${DEFAULT_DEVICE_SERIAL:-}"
+    LAST_WORKING_ENDPOINT="${LAST_WORKING_ENDPOINT:-}"
+    DISABLE_ADB_WIFI_ON_STOP="${DISABLE_ADB_WIFI_ON_STOP:-$DEFAULT_DISABLE_ADB_WIFI_ON_STOP}"
+    PRESET="${PRESET:-$DEFAULT_PRESET}"
 
     # V4L2 sink: allow config, with env override
     V4L2_SINK="${V4L2_SINK:-$DEFAULT_V4L2_SINK}"
@@ -220,6 +234,202 @@ notify() {
         # Fallback to echo if notify-send is not available
         echo "[$level] $title: $msg" >&2
     fi
+}
+
+notify_throttled() {
+    local key="$1"
+    local ttl="${2:-60}"
+    local level="$3"
+    local title="$4"
+    local msg="$5"
+    local icon="${6:-camera-web}"
+
+    ensure_state_dirs
+    local notify_dir="$STATE_DIR/notify"
+    mkdir -p "$notify_dir" 2>/dev/null || true
+    local marker="$notify_dir/$key.ts"
+
+    local now=0
+    now=$(date +%s 2>/dev/null || echo 0)
+    local last=0
+    if [ -f "$marker" ]; then
+        last=$(sed -n '1p' "$marker" 2>/dev/null || echo 0)
+        [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    fi
+
+    if [ $((now-last)) -lt "$ttl" ] 2>/dev/null; then
+        return 0
+    fi
+
+    printf "%s\n" "$now" > "$marker" 2>/dev/null || true
+    notify "$level" "$title" "$msg" "$icon"
+}
+
+get_connected_device_count() {
+    local count
+    count=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '[[:space:]]device$' || echo "0")
+    count=$(echo "$count" | tr -d '[:space:]')
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    echo "$count"
+}
+
+select_usb_device() {
+    # Prefer configured default serial if available, otherwise first connected device.
+    local candidates=()
+    local line serial
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        serial=$(echo "$line" | awk '{print $1}' | tr -d '[:space:]')
+        [ -n "$serial" ] && candidates+=("$serial")
+    done < <(adb devices 2>/dev/null | grep -v "List" | grep -E '[[:space:]]device$')
+
+    local n=${#candidates[@]}
+    if [ "$n" -eq 0 ]; then
+        return 1
+    fi
+
+    if [ -n "${DEFAULT_DEVICE_SERIAL:-}" ]; then
+        local i
+        for i in "${!candidates[@]}"; do
+            if [ "${candidates[$i]}" = "$DEFAULT_DEVICE_SERIAL" ]; then
+                echo "$DEFAULT_DEVICE_SERIAL"
+                return 0
+            fi
+        done
+    fi
+
+    if [ "$n" -eq 1 ]; then
+        echo "${candidates[0]}"
+        return 0
+    fi
+
+    # Multi-device: keep UX simple and deterministic; pick first when non-interactive command path.
+    echo "${candidates[0]}"
+    return 0
+}
+
+detect_phone_ip_over_adb() {
+    local serial="$1"
+    local detected_ip=""
+    local ip_val=""
+    local iface
+
+    for iface in wlan0 swlan0 wlan1 wlan2 wifi0; do
+        ip_val=$(adb -s "$serial" shell ip -4 -o addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr -d '[:space:]' || true)
+        if [ -n "$ip_val" ] && validate_ip "$ip_val"; then
+            detected_ip="$ip_val"
+            break
+        fi
+    done
+
+    if [ -z "$detected_ip" ]; then
+        local all_ips iface_name ip_part
+        all_ips=$(adb -s "$serial" shell ip -4 -o addr show 2>/dev/null | awk '{print $2":"$4}' | cut -d: -f1,2 | cut -d/ -f1 || true)
+        while IFS= read -r line || [ -n "$line" ]; do
+            [ -z "$line" ] && continue
+            iface_name=$(echo "$line" | cut -d: -f1 | tr -d '[:space:]')
+            ip_part=$(echo "$line" | cut -d: -f2 | tr -d '[:space:]')
+            [[ "$iface_name" == "lo" ]] || [[ "$iface_name" == "lo:"* ]] && continue
+            if [ -n "$ip_part" ] && validate_ip "$ip_part"; then
+                if [[ "$ip_part" =~ ^10\. ]] || [[ "$ip_part" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] || [[ "$ip_part" =~ ^192\.168\. ]]; then
+                    detected_ip="$ip_part"
+                    break
+                fi
+            fi
+        done <<< "$all_ips"
+    fi
+
+    [ -n "$detected_ip" ] || return 1
+    echo "$detected_ip"
+    return 0
+}
+
+save_connection_state() {
+    local serial="$1"
+    local ip="$2"
+    [ -n "$serial" ] || return 0
+    [ -n "$ip" ] || return 0
+
+    mkdir -p "$CONFIG_DIR"
+    if ! load_config 2>/dev/null; then
+        cat > "$CONFIG_FILE" << EOF
+# Android Webcam Configuration
+PHONE_IP="$ip"
+CAMERA_FACING="$DEFAULT_CAMERA_FACING"
+VIDEO_SIZE="$DEFAULT_VIDEO_SIZE"
+BIT_RATE="$DEFAULT_BIT_RATE"
+EXTRA_ARGS="$DEFAULT_ARGS"
+SHOW_WINDOW="true"
+RELOAD_V4L2_ON_STOP="$DEFAULT_RELOAD_V4L2_ON_STOP"
+V4L2_SINK="$DEFAULT_V4L2_SINK"
+DEFAULT_DEVICE_SERIAL="$serial"
+LAST_WORKING_ENDPOINT="$ip:5555"
+DISABLE_ADB_WIFI_ON_STOP="$DEFAULT_DISABLE_ADB_WIFI_ON_STOP"
+PRESET="$DEFAULT_PRESET"
+EOF
+        return 0
+    fi
+
+    sed -i "s|^PHONE_IP=.*|PHONE_IP=\"$ip\"|" "$CONFIG_FILE" 2>/dev/null || true
+    sed -i "s|^DEFAULT_DEVICE_SERIAL=.*|DEFAULT_DEVICE_SERIAL=\"$serial\"|" "$CONFIG_FILE" 2>/dev/null || true
+    sed -i "s|^LAST_WORKING_ENDPOINT=.*|LAST_WORKING_ENDPOINT=\"$ip:5555\"|" "$CONFIG_FILE" 2>/dev/null || true
+}
+
+save_last_endpoint_only() {
+    local ip="$1"
+    [ -n "$ip" ] || return 0
+    mkdir -p "$CONFIG_DIR"
+    if [ -f "$CONFIG_FILE" ]; then
+        if grep -q '^LAST_WORKING_ENDPOINT=' "$CONFIG_FILE" 2>/dev/null; then
+            sed -i "s|^LAST_WORKING_ENDPOINT=.*|LAST_WORKING_ENDPOINT=\"$ip:5555\"|" "$CONFIG_FILE" 2>/dev/null || true
+        else
+            printf '\nLAST_WORKING_ENDPOINT="%s:5555"\n' "$ip" >> "$CONFIG_FILE"
+        fi
+    fi
+}
+
+repair_over_usb() {
+    local silent="${1:-false}"
+    if ! command -v adb >/dev/null 2>&1; then
+        [ "$silent" = true ] || echo -e "${RED}Error:${NC} adb not found"
+        return 1
+    fi
+
+    local serial
+    serial=$(select_usb_device || true)
+    if [ -z "$serial" ]; then
+        if adb devices 2>/dev/null | grep -q -E '[[:space:]]unauthorized$'; then
+            [ "$silent" = true ] || echo -e "${YELLOW}USB device is unauthorized. Unlock phone and accept RSA prompt.${NC}"
+            notify_throttled "usb_unauthorized" 60 "normal" "Android Camera" "Odblokuj telefon i zaakceptuj autoryzacje USB" "smartphone"
+            return 1
+        fi
+        [ "$silent" = true ] || echo -e "${YELLOW}No authorized USB device found.${NC}"
+        notify_throttled "usb_missing" 60 "normal" "Android Camera" "Podlacz USB i odblokuj telefon" "smartphone"
+        return 1
+    fi
+
+    if ! adb -s "$serial" tcpip 5555 >/dev/null 2>&1; then
+        [ "$silent" = true ] || echo -e "${RED}Error:${NC} failed to enable tcpip on $serial"
+        return 1
+    fi
+
+    local ip=""
+    ip=$(detect_phone_ip_over_adb "$serial" || true)
+    if [ -z "$ip" ]; then
+        [ "$silent" = true ] || echo -e "${RED}Error:${NC} could not detect phone IP over USB"
+        return 1
+    fi
+
+    save_connection_state "$serial" "$ip"
+    adb disconnect "$ip:5555" >/dev/null 2>&1 || true
+    if ! adb connect "$ip:5555" >/dev/null 2>&1; then
+        [ "$silent" = true ] || echo -e "${RED}Error:${NC} failed to connect to $ip:5555 after repair"
+        return 1
+    fi
+
+    [ "$silent" = true ] || echo -e "${GREEN}Repair complete.${NC} Endpoint: $ip:5555"
+    notify_throttled "usb_repair_ok" 30 "normal" "Android Camera" "Naprawa przez USB zakonczona sukcesem" "smartphone"
+    return 0
 }
 
 is_running() {
@@ -337,11 +547,28 @@ cmd_start() {
         # Connection attempt (with retry)
         if ! adb_connect_with_retry "$PHONE_IP" 3; then
             echo -e "${RED}Error:${NC} Failed to connect to $PHONE_IP:5555"
-            echo "Tip: run '$0 setup' to re-pair USB and enable TCP/IP mode again."
-            notify "critical" "Android Camera" "Connection failed" "error"
-            echo "Next: run '$0 setup'" >&2
-            return 12
+            echo "Attempting USB auto-repair (if authorized USB device is connected)..."
+            if repair_over_usb true; then
+                if ! load_config; then
+                    echo "Next: run '$0 doctor'" >&2
+                    return 11
+                fi
+                if ! adb_connect_with_retry "$PHONE_IP" 2; then
+                    echo -e "${RED}Error:${NC} Auto-repair completed but reconnect still failed ($PHONE_IP:5555)."
+                    notify_throttled "conn_failed_after_repair" 60 "critical" "Android Camera" "Naprawa USB zakonczona, ale polaczenie nadal nie dziala" "error"
+                    echo "Next: run '$0 repair'" >&2
+                    return 12
+                fi
+                echo -e "${GREEN}USB auto-repair succeeded.${NC}"
+            else
+                echo "Tip: connect USB and run '$0 repair' (or '$0 setup')."
+                notify_throttled "conn_failed" 60 "critical" "Android Camera" "Brak polaczenia. Podlacz USB i uruchom Repair" "error"
+                echo "Next: run '$0 repair'" >&2
+                return 12
+            fi
         fi
+
+        save_last_endpoint_only "$PHONE_IP"
     fi
     
     SCRCPY_BIN=$(find_scrcpy)
@@ -799,6 +1026,17 @@ cmd_stop() {
                 fi
             fi
         fi
+
+        # Optional security hygiene: switch back to USB mode when USB device is connected.
+        local disable_wifi
+        disable_wifi=$(echo "${DISABLE_ADB_WIFI_ON_STOP:-false}" | tr '[:upper:]' '[:lower:]')
+        if [[ "$disable_wifi" == "true" || "$disable_wifi" == "1" || "$disable_wifi" == "yes" ]]; then
+            local usb_serial=""
+            usb_serial=$(select_usb_device || true)
+            if [ -n "$usb_serial" ]; then
+                adb -s "$usb_serial" usb >/dev/null 2>&1 || true
+            fi
+        fi
     fi
 
     if $was_running; then
@@ -885,6 +1123,7 @@ cmd_version() {
 }
 
 cmd_fix() {
+    load_config 2>/dev/null || true
     if ! command -v adb >/dev/null 2>&1; then
         echo -e "${RED}Error:${NC} adb not found!"
         notify "critical" "Camera Setup" "adb not found" "error"
@@ -917,12 +1156,12 @@ cmd_fix() {
     # Get USB device ID (in case there are multiple devices - any state: device, unauthorized, offline)
     local usb_device_id=""
     local total_count
-    total_count=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\t' | wc -l 2>/dev/null || echo "0")
+    total_count=$(adb devices 2>/dev/null | grep -v "List" | grep -E '[[:space:]]' | wc -l 2>/dev/null || echo "0")
     total_count=$(echo "$total_count" | tr -d '\n\r' | head -n 1)
     [ -z "$total_count" ] || ! [[ "$total_count" =~ ^[0-9]+$ ]] && total_count="0"
     if [ "$total_count" -gt 1 ]; then
         local device_list
-        device_list=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$')
+        device_list=$(adb devices 2>/dev/null | grep -v "List" | grep -E '[[:space:]]device$')
         local devices=()
         local line serial
         while IFS= read -r line; do
@@ -937,6 +1176,19 @@ cmd_fix() {
             usb_device_id="${devices[0]}"
             echo -e "${BLUE}Using device: $usb_device_id${NC}"
         else
+            if [ -n "${DEFAULT_DEVICE_SERIAL:-}" ]; then
+                local j
+                for j in "${!devices[@]}"; do
+                    if [ "${devices[$j]}" = "$DEFAULT_DEVICE_SERIAL" ]; then
+                        usb_device_id="$DEFAULT_DEVICE_SERIAL"
+                        echo -e "${BLUE}Using default device: $usb_device_id${NC}"
+                        break
+                    fi
+                done
+            fi
+            if [ -n "$usb_device_id" ]; then
+                :
+            else
             echo -e "${BLUE}Multiple devices in \"device\" state. Select one:${NC}"
             local i
             for i in "${!devices[@]}"; do
@@ -965,30 +1217,31 @@ cmd_fix() {
             if [ -n "$usb_device_id" ]; then
                 echo -e "${BLUE}Using device: $usb_device_id${NC}"
             fi
+            fi
         fi
     fi
     
     # Fallback: if still empty but multiple devices total, use first device in "device" state
     if [ -z "$usb_device_id" ] && [ "$total_count" -gt 1 ] 2>/dev/null; then
-        usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+        usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '[[:space:]]device$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
     fi
     
     # Final check: right before tcpip, re-read device list (may have changed since wait-for-usb)
     if [ -z "$usb_device_id" ]; then
         local device_count_now
-        device_count_now=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
+        device_count_now=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '[[:space:]]device$' 2>/dev/null || echo "0")
         device_count_now=$(echo "$device_count_now" | tr -d '\n\r' | head -n 1)
         [[ "$device_count_now" =~ ^[0-9]+$ ]] && [ "$device_count_now" -gt 1 ] 2>/dev/null && \
-            usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+            usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '[[:space:]]device$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
     fi
     
     # Unconditional safety: never run "adb tcpip" without -s when multiple devices are present
     local device_count_final
-    device_count_final=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' 2>/dev/null || echo "0")
+    device_count_final=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '[[:space:]]device$' 2>/dev/null || echo "0")
     device_count_final=$(echo "$device_count_final" | tr -d '\n\r' | head -n 1)
     if [[ "$device_count_final" =~ ^[0-9]+$ ]] && [ "$device_count_final" -ge 2 ] 2>/dev/null; then
         if [ -z "$usb_device_id" ]; then
-            usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '\tdevice$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+            usb_device_id=$(adb devices 2>/dev/null | grep -v "List" | grep -E '[[:space:]]device$' | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
         fi
         if [ -n "$usb_device_id" ]; then
             echo -e "${BLUE}Using device: $usb_device_id${NC}"
@@ -1058,12 +1311,35 @@ cmd_fix() {
             if sed -i "s|PHONE_IP=.*|PHONE_IP=\"$detected_ip\"|" "$CONFIG_FILE" 2>/dev/null; then
                 echo -e "${GREEN}Saved IP to config: $detected_ip${NC}"
             fi
+            if [ -n "$usb_device_id" ]; then
+                if grep -q '^DEFAULT_DEVICE_SERIAL=' "$CONFIG_FILE" 2>/dev/null; then
+                    sed -i "s|^DEFAULT_DEVICE_SERIAL=.*|DEFAULT_DEVICE_SERIAL=\"$usb_device_id\"|" "$CONFIG_FILE" 2>/dev/null || true
+                else
+                    printf '\nDEFAULT_DEVICE_SERIAL="%s"\n' "$usb_device_id" >> "$CONFIG_FILE"
+                fi
+            fi
+            if grep -q '^LAST_WORKING_ENDPOINT=' "$CONFIG_FILE" 2>/dev/null; then
+                sed -i "s|^LAST_WORKING_ENDPOINT=.*|LAST_WORKING_ENDPOINT=\"$detected_ip:5555\"|" "$CONFIG_FILE" 2>/dev/null || true
+            else
+                printf '\nLAST_WORKING_ENDPOINT="%s:5555"\n' "$detected_ip" >> "$CONFIG_FILE"
+            fi
         else
             mkdir -p "$CONFIG_DIR"
-            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\nSHOW_WINDOW="true"\nRELOAD_V4L2_ON_STOP="true"\nV4L2_SINK="/dev/video10"\n' "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
+            printf '# Android Webcam Configuration\nPHONE_IP="%s"\nCAMERA_FACING="back"\nVIDEO_SIZE=""\nBIT_RATE="8M"\nEXTRA_ARGS="--no-audio --v4l2-buffer=400"\nSHOW_WINDOW="true"\nRELOAD_V4L2_ON_STOP="true"\nV4L2_SINK="/dev/video10"\nDEFAULT_DEVICE_SERIAL="%s"\nLAST_WORKING_ENDPOINT="%s:5555"\nDISABLE_ADB_WIFI_ON_STOP="false"\nPRESET="meeting"\n' "$detected_ip" "${usb_device_id:-}" "$detected_ip" > "$CONFIG_FILE" 2>/dev/null && \
                 echo -e "${GREEN}Saved IP to config: $detected_ip${NC}"
         fi
     fi
+}
+
+cmd_repair() {
+    echo -e "${BLUE}Attempting USB repair...${NC}"
+    if repair_over_usb false; then
+        echo -e "${GREEN}Repair done. You can disconnect USB now and run: $0 start${NC}"
+        return 0
+    fi
+    echo -e "${RED}Repair failed.${NC}"
+    echo "Next: connect authorized USB device and run '$0 setup'"
+    return 1
 }
 
 cmd_status() {
@@ -1105,6 +1381,10 @@ cmd_status() {
     echo "Video Size:     ${VIDEO_SIZE:-Max}"
     echo "Bitrate:        $BIT_RATE"
     echo "V4L2 Sink:      $V4L2_SINK"
+    echo "Preset:         ${PRESET:-meeting}"
+    echo "Default Serial: ${DEFAULT_DEVICE_SERIAL:-[Not Set]}"
+    echo "Last Endpoint:  ${LAST_WORKING_ENDPOINT:-[Not Set]}"
+    echo "Disable ADB WiFi on stop: ${DISABLE_ADB_WIFI_ON_STOP:-false}"
     echo "Log:            $LOG_FILE (legacy: $LEGACY_LOG_FILE)"
     
     # Check dependencies
@@ -1340,7 +1620,7 @@ cmd_doctor() {
 
     if command -v adb >/dev/null 2>&1; then
         local online_count
-        online_count=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '\tdevice$' || echo "0")
+        online_count=$(adb devices 2>/dev/null | grep -v "List" | grep -c -E '[[:space:]]device$' || echo "0")
         online_count=$(echo "$online_count" | tr -d '[:space:]')
         if [[ "$online_count" =~ ^[0-9]+$ ]] && [ "$online_count" -gt 0 ] 2>/dev/null; then
             doctor_emit "adb devices" "OK" "$online_count device(s) in 'device' state"
@@ -1371,7 +1651,7 @@ cmd_doctor() {
         action_add "Ensure v4l2loopback is loaded (default sink /dev/video10): sudo modprobe v4l2loopback"
     fi
     if [ "$need_pair" = true ]; then
-        action_add "Pair phone again: android-webcam-ctl setup"
+        action_add "Connect USB and run: android-webcam-ctl repair (or setup)"
     fi
     if [ "$need_video_group" = true ]; then
         action_add "Add user to video group: sudo usermod -aG video $USER (then log out/in)"
@@ -1396,14 +1676,18 @@ cmd_doctor() {
                 actions_json+="\"$(doctor_json_escape "$line")\""
             done <<< "$suggested_actions"
         fi
-        printf '{"schema_version":1,"result":"%s","fails":%s,"warnings":%s,"checks":{%s},"suggested_actions":[%s]}\n' "$result" "$fails" "$warns" "$doctor_items" "$actions_json"
+        local top_action=""
+        if [ -n "$suggested_actions" ]; then
+            top_action=$(printf "%s" "$suggested_actions" | sed -n '1p')
+        fi
+        printf '{"schema_version":1,"result":"%s","fails":%s,"warnings":%s,"checks":{%s},"top_action":"%s","suggested_actions":[%s]}\n' "$result" "$fails" "$warns" "$doctor_items" "$(doctor_json_escape "$top_action")" "$actions_json"
     else
         echo ""
         echo -e "Doctor result: ${RED}${fails} fail${NC}, ${YELLOW}${warns} warning${NC}"
         if [ "$fails" -gt 0 ]; then
             echo "Suggested quick fixes:"
             echo "- Re-run installer: curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash"
-            echo "- Pair phone again: android-webcam-ctl setup"
+            echo "- Repair over USB: android-webcam-ctl repair"
             echo "- If v4l2 sink missing (default /dev/video10): sudo modprobe v4l2loopback"
         elif [ "$warns" -gt 0 ]; then
             echo "Warnings detected. Camera may still work, but reliability can be reduced."
@@ -1422,6 +1706,49 @@ cmd_doctor() {
     fi
 
     return "$exit_code"
+}
+
+cmd_preset() {
+    local preset="${1:-}"
+    case "$preset" in
+        meeting|hq|low-latency) ;;
+        *)
+            echo "Usage: $0 preset {meeting|hq|low-latency}" >&2
+            return 1
+            ;;
+    esac
+
+    load_config || return 1
+
+    case "$preset" in
+        meeting)
+            BIT_RATE="8M"
+            VIDEO_SIZE="1080"
+            EXTRA_ARGS="--no-audio --v4l2-buffer=400"
+            ;;
+        hq)
+            BIT_RATE="12M"
+            VIDEO_SIZE="1440"
+            EXTRA_ARGS="--no-audio --v4l2-buffer=600"
+            ;;
+        low-latency)
+            BIT_RATE="6M"
+            VIDEO_SIZE="720"
+            EXTRA_ARGS="--no-audio --v4l2-buffer=200 --max-fps=30"
+            ;;
+    esac
+
+    sed -i "s|^BIT_RATE=.*|BIT_RATE=\"$BIT_RATE\"|" "$CONFIG_FILE" 2>/dev/null || true
+    sed -i "s|^VIDEO_SIZE=.*|VIDEO_SIZE=\"$VIDEO_SIZE\"|" "$CONFIG_FILE" 2>/dev/null || true
+    sed -i "s|^EXTRA_ARGS=.*|EXTRA_ARGS=\"$EXTRA_ARGS\"|" "$CONFIG_FILE" 2>/dev/null || true
+    if grep -q '^PRESET=' "$CONFIG_FILE" 2>/dev/null; then
+        sed -i "s|^PRESET=.*|PRESET=\"$preset\"|" "$CONFIG_FILE" 2>/dev/null || true
+    else
+        printf '\nPRESET="%s"\n' "$preset" >> "$CONFIG_FILE"
+    fi
+
+    echo -e "${GREEN}Preset applied:${NC} $preset"
+    return 0
 }
 
 cmd_config() {
@@ -1516,17 +1843,20 @@ case "$1" in
     toggle)  cmd_toggle ;;
     setup)   cmd_fix ;;
     fix)     cmd_fix ;;  # backward compatibility
+    repair)  cmd_repair ;;
     status)  cmd_status ;;
     doctor)  cmd_doctor "${2:-}" ;;
     logs)    cmd_logs "${2:-}" "${3:-}" ;;
     version) cmd_version ;;
+    preset)  cmd_preset "${2:-}" ;;
     config)  cmd_config ;;
     uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|config|uninstall}"
+        echo "Usage: $0 {start|stop|toggle|setup|repair|status|doctor|logs|version|preset|config|uninstall}"
         echo "       $0 doctor [--json]"
         echo "       $0 start [--dry-run]"
         echo "       $0 logs [--path] [--sessions] [--follow|-f] [--tail N|-n N]"
+        echo "       $0 preset {meeting|hq|low-latency}"
         exit 1
         ;;
 esac

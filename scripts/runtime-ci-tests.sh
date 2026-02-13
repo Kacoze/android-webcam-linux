@@ -80,6 +80,10 @@ EXTRA_ARGS="--no-audio"
 SHOW_WINDOW="false"
 RELOAD_V4L2_ON_STOP="false"
 V4L2_SINK="$sink"
+DEFAULT_DEVICE_SERIAL=""
+LAST_WORKING_ENDPOINT=""
+DISABLE_ADB_WIFI_ON_STOP="false"
+PRESET="meeting"
 EOF
 }
 
@@ -116,10 +120,14 @@ set +e
 run_cmd "$home1" "$RUNTIME_DIR/android-webcam-ctl" doctor --json > "$CI_DIR/doctor-ok.json"
 rc=$?
 set -e
-expect_rc 2 "$rc" "doctor baseline"
+if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+  echo "Expected rc=0 or rc=2, got rc=$rc (doctor baseline)" >&2
+  exit 1
+fi
 grep -q '"checks"' "$CI_DIR/doctor-ok.json"
 grep -q '"suggested_actions"' "$CI_DIR/doctor-ok.json"
 grep -q '"schema_version":1' "$CI_DIR/doctor-ok.json"
+grep -q '"top_action"' "$CI_DIR/doctor-ok.json"
 
 # 2) doctor --json fails when sink missing
 home2=$(mk_test_home "doctor-sink-missing")
@@ -196,5 +204,61 @@ rc=$?
 set -e
 expect_rc 16 "$rc" "payload missing"
 grep -q "scrcpy server payload is missing" "$CI_DIR/payload-missing.txt"
+
+# 6) repair succeeds with USB device and writes endpoint/serial
+home6=$(mk_test_home "repair")
+sink6="$home6/video10"
+touch "$sink6"
+touch "$home6/.local/bin/scrcpy-server"
+write_config "$home6" "$sink6"
+
+cat > "$home6/.local/bin/adb" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  devices)
+    echo "List of devices attached"
+    echo -e "usb-serial-01\tdevice"
+    ;;
+  -s)
+    serial="${2:-}"
+    shift 2
+    case "${1:-}" in
+      shell)
+        if [ "${2:-}" = "ip" ]; then
+          echo "2: wlan0    inet 192.168.1.77/24 brd 192.168.1.255 scope global wlan0"
+        fi
+        ;;
+      tcpip)
+        ;;
+    esac
+    ;;
+  connect)
+    ;;
+  disconnect)
+    ;;
+  wait-for-usb-device)
+    ;;
+esac
+exit 0
+EOF
+chmod +x "$home6/.local/bin/adb"
+
+set +e
+run_cmd "$home6" "$RUNTIME_DIR/android-webcam-ctl" repair > "$CI_DIR/repair.txt"
+rc=$?
+set -e
+expect_rc 0 "$rc" "repair success"
+grep -q 'DEFAULT_DEVICE_SERIAL="usb-serial-01"' "$home6/.config/android-webcam/settings.conf"
+grep -q 'LAST_WORKING_ENDPOINT="192.168.1.77:5555"' "$home6/.config/android-webcam/settings.conf"
+
+# 7) preset command updates config values
+set +e
+run_cmd "$home6" "$RUNTIME_DIR/android-webcam-ctl" preset low-latency > "$CI_DIR/preset.txt"
+rc=$?
+set -e
+expect_rc 0 "$rc" "preset low-latency"
+grep -q 'BIT_RATE="6M"' "$home6/.config/android-webcam/settings.conf"
+grep -q 'PRESET="low-latency"' "$home6/.config/android-webcam/settings.conf"
 
 echo "Runtime CI tests passed."

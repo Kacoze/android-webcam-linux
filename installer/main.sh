@@ -77,6 +77,10 @@ EXTRA_ARGS="--no-audio --v4l2-buffer=400"
 SHOW_WINDOW="true"
 RELOAD_V4L2_ON_STOP="true"
 V4L2_SINK="/dev/video10"
+DEFAULT_DEVICE_SERIAL=""
+LAST_WORKING_ENDPOINT=""
+DISABLE_ADB_WIFI_ON_STOP="false"
+PRESET="meeting"
 EOF
     log_success "Created default config: $CONFIG_FILE"
   else
