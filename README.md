@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bo
 To pin a specific version/ref (recommended for reproducible installs):
 
 ```bash
-ANDROID_WEBCAM_REF="v1.2.2" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
+ANDROID_WEBCAM_REF="v1.2.3" curl -fsSL https://raw.githubusercontent.com/Kacoze/android-webcam-linux/main/bootstrap.sh | bash
 ```
 
 ### Installation (Debian/Ubuntu .deb)
@@ -97,6 +97,12 @@ If you prefer a package install, download the latest `.deb` from GitHub Releases
 
 ```bash
 sudo dpkg -i android-webcam-linux_*.deb
+```
+
+Optional (for users who want Stop Camera without password prompt):
+
+```bash
+android-webcam-ctl enable-passwordless-stop
 ```
 
 ### Installation (APT repo)
@@ -444,6 +450,20 @@ Doctor exit codes: `0=OK`, `1=FAIL`, `2=WARN`.
 **Symptoms:** You stop the camera, then start it again. The preview window appears and seems to work, but Google Meet, Zoom, or the browser does not list or use the camera. Restarting the PC fixes it.
 
 **Explanation:** This is due to a v4l2loopback limitation with `exclusive_caps=1`. When you click **Stop Camera**, the tool reloads the v4l2loopback module so that the next start uses a clean device and the camera is visible again in Meet/Zoom. A password dialog (pkexec/PolicyKit) may appear when you stop the camera; this is normal and allows the reload to complete. If you cancel it (or the reload fails), click **Stop Camera** again and accept the prompt. As a last resort, reboot.
+
+Optional convenience (advanced, opt-in):
+
+```bash
+android-webcam-ctl enable-passwordless-stop
+```
+
+This command asks for confirmation, shows exactly what will be written, and creates a narrow sudoers rule only for reloading `v4l2loopback` (so Stop Camera does not ask for password).
+
+To revert:
+
+```bash
+android-webcam-ctl disable-passwordless-stop
+```
 
 #### "v4l2loopback module not found" or "/dev/video10 missing"
 

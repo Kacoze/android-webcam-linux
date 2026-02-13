@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-02-13
+
+- Added optional passwordless Stop via a narrow sudoers rule for reloading `v4l2loopback`.
+- Stop now falls back to authenticated reload (polkit/sudo) when passwordless is not enabled.
+- Added `enable-passwordless-stop`, `disable-passwordless-stop`, and `passwordless-stop-status` commands.
+- Doctor now reports passwordless stop status and suggests enabling it as an optional convenience.
+- Expanded runtime CI tests to cover passwordless status parsing and stop fallback behavior.
+
 ## [1.2.2] - 2026-02-13
 
 - Set front camera as default for new installs/configs.
