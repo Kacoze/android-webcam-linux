@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-02-13
+
 - Added `android-webcam-ctl update` command with `--check` / `--yes` / `--ref` options.
 - Added desktop menu action `Update` (right-click on Camera Phone icon).
 
