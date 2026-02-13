@@ -12,6 +12,7 @@ LATEST_LOG="$LOG_DIR/latest.log"
 LEGACY_LOG_FILE="/tmp/android-cam.log"
 PID_FILE="$CONFIG_DIR/scrcpy.pid"
 V4L2_SINK_OVERRIDE="${ANDROID_WEBCAM_V4L2_SINK:-}"
+SUDOERS_STOP_FILE="${ANDROID_WEBCAM_SUDOERS_STOP_FILE:-/etc/sudoers.d/android-webcam-v4l2loopback}"
 
 # Default configuration values
 DEFAULT_CAMERA_FACING="front" # front, back, external
@@ -69,6 +70,31 @@ sink_exists() {
     else
         [ -e "$sink" ]
     fi
+}
+
+resolve_modprobe_bin() {
+    if [ -x /usr/sbin/modprobe ]; then
+        echo "/usr/sbin/modprobe"
+    elif [ -x /sbin/modprobe ]; then
+        echo "/sbin/modprobe"
+    elif command -v modprobe >/dev/null 2>&1; then
+        command -v modprobe
+    else
+        echo ""
+    fi
+}
+
+passwordless_stop_enabled_for_user() {
+    if [ ! -f "$SUDOERS_STOP_FILE" ]; then
+        return 1
+    fi
+    awk -v u="$USER" '($1==u) && /NOPASSWD:/ && /modprobe/ {found=1} END{exit(found?0:1)}' "$SUDOERS_STOP_FILE" 2>/dev/null
+}
+
+run_v4l2_reload_with_passwordless_sudo() {
+    local modprobe_bin="$1"
+    sudo -n "$modprobe_bin" -r v4l2loopback 2>/dev/null || true
+    sudo -n "$modprobe_bin" v4l2loopback 2>/dev/null
 }
 
 # Compatibility: keep LOG_FILE variable pointing to latest session log
@@ -1009,20 +1035,39 @@ cmd_stop() {
         if [[ "$reload_lower" != "false" && "$reload_lower" != "0" && "$reload_lower" != "no" ]]; then
             if lsmod 2>/dev/null | grep -q v4l2loopback; then
                 local reload_ok=false
+                local modprobe_bin
+                modprobe_bin=$(resolve_modprobe_bin)
                 # Give scrcpy time to fully release /dev/video10 before unloading module
                 sleep 2
-                if command -v pkexec >/dev/null 2>&1; then
-                    if pkexec sh -c "modprobe -r v4l2loopback 2>/dev/null; modprobe v4l2loopback" 2>/dev/null; then
+                if [ -n "$modprobe_bin" ] && command -v sudo >/dev/null 2>&1; then
+                    if run_v4l2_reload_with_passwordless_sudo "$modprobe_bin"; then
                         reload_ok=true
                     fi
                 fi
-                if [ "$reload_ok" = false ] && command -v sudo >/dev/null 2>&1; then
-                    sudo sh -c "modprobe -r v4l2loopback 2>/dev/null; modprobe v4l2loopback" 2>/dev/null && reload_ok=true
+
+                # If passwordless mode is not configured, ask for authentication and perform reload.
+                if [ "$reload_ok" = false ]; then
+                    echo -e "${YELLOW}Module reload needs administrator privileges.${NC}"
+                    echo "You can enable passwordless stop with: $0 enable-passwordless-stop"
+                    if command -v pkexec >/dev/null 2>&1 && [ -n "$modprobe_bin" ]; then
+                        if pkexec sh -c "'$modprobe_bin' -r v4l2loopback 2>/dev/null; '$modprobe_bin' v4l2loopback" 2>/dev/null; then
+                            reload_ok=true
+                        fi
+                    fi
+                fi
+                if [ "$reload_ok" = false ] && command -v sudo >/dev/null 2>&1 && [ -n "$modprobe_bin" ]; then
+                    echo -e "${BLUE}Sudo password may be required to reload v4l2loopback.${NC}"
+                    if sudo "$modprobe_bin" -r v4l2loopback 2>/dev/null; then
+                        sudo "$modprobe_bin" v4l2loopback 2>/dev/null && reload_ok=true
+                    else
+                        # module may be busy or already unloaded; still try load
+                        sudo "$modprobe_bin" v4l2loopback 2>/dev/null && reload_ok=true
+                    fi
                 fi
                 if [ "$reload_ok" = true ]; then
                     sleep 1
                 else
-                    notify "normal" "Android Camera" "Could not reload video module. If Meet/Zoom does not see the camera next time, click Stop again and enter the password prompt (if shown) or reboot." "dialog-warning"
+                    notify "normal" "Android Camera" "Could not reload video module. Meet/Zoom may not detect camera next time. You can enable passwordless stop: android-webcam-ctl enable-passwordless-stop" "dialog-warning"
                 fi
             fi
         fi
@@ -1336,6 +1381,121 @@ cmd_fix() {
     fi
 }
 
+cmd_passwordless_stop_status() {
+    local modprobe_bin
+    modprobe_bin=$(resolve_modprobe_bin)
+    if [ -z "$modprobe_bin" ]; then
+        echo -e "${RED}Status:${NC} modprobe not found"
+        return 1
+    fi
+
+    if passwordless_stop_enabled_for_user; then
+        echo -e "${GREEN}Passwordless stop:${NC} enabled for user '$USER'"
+        echo "Sudoers file: $SUDOERS_STOP_FILE"
+        echo "Allowed commands:"
+        echo "- $modprobe_bin -r v4l2loopback"
+        echo "- $modprobe_bin v4l2loopback"
+        return 0
+    fi
+
+    echo -e "${YELLOW}Passwordless stop:${NC} not enabled"
+    echo "Run: $0 enable-passwordless-stop"
+    return 1
+}
+
+cmd_enable_passwordless_stop() {
+    local modprobe_bin
+    modprobe_bin=$(resolve_modprobe_bin)
+    if [ -z "$modprobe_bin" ]; then
+        echo -e "${RED}Error:${NC} modprobe not found"
+        return 1
+    fi
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo -e "${RED}Error:${NC} sudo is required"
+        return 1
+    fi
+    if ! command -v visudo >/dev/null 2>&1; then
+        echo -e "${RED}Error:${NC} visudo is required (install sudo package)."
+        return 1
+    fi
+
+    local safe_user="$USER"
+    if ! [[ "$safe_user" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        echo -e "${RED}Error:${NC} current username contains unsupported characters: $safe_user"
+        return 1
+    fi
+
+    echo -e "${BLUE}Enable passwordless Stop Camera?${NC}"
+    echo "This will allow user '$safe_user' to run ONLY these commands without password:"
+    echo "  $modprobe_bin -r v4l2loopback"
+    echo "  $modprobe_bin v4l2loopback"
+    echo "Sudoers file to create/update: $SUDOERS_STOP_FILE"
+    read -r -p "Proceed? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Cancelled."
+        return 0
+    fi
+
+    if ! sudo -v; then
+        echo -e "${RED}Error:${NC} failed to obtain sudo privileges"
+        return 1
+    fi
+
+    local tmp
+    tmp=$(mktemp)
+    cat > "$tmp" <<EOF
+# Managed by android-webcam-ctl
+# Allows passwordless module reload for Stop Camera only.
+$safe_user ALL=(root) NOPASSWD: $modprobe_bin -r v4l2loopback, $modprobe_bin v4l2loopback
+EOF
+
+    if ! sudo visudo -cf "$tmp" >/dev/null 2>&1; then
+        rm -f "$tmp"
+        echo -e "${RED}Error:${NC} generated sudoers snippet is invalid"
+        return 1
+    fi
+
+    if ! sudo install -o root -g root -m 0440 "$tmp" "$SUDOERS_STOP_FILE"; then
+        rm -f "$tmp"
+        echo -e "${RED}Error:${NC} could not install $SUDOERS_STOP_FILE"
+        return 1
+    fi
+    rm -f "$tmp"
+
+    if sudo -n "$modprobe_bin" v4l2loopback >/dev/null 2>&1; then
+        echo -e "${GREEN}Enabled.${NC} Stop Camera should no longer ask for password."
+    else
+        echo -e "${YELLOW}Enabled.${NC} Sudoers rule installed, but command dry-run check could not be confirmed."
+    fi
+    return 0
+}
+
+cmd_disable_passwordless_stop() {
+    if [ ! -f "$SUDOERS_STOP_FILE" ]; then
+        echo "Passwordless stop is already disabled."
+        return 0
+    fi
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo -e "${RED}Error:${NC} sudo is required"
+        return 1
+    fi
+
+    echo -e "${BLUE}Disable passwordless Stop Camera?${NC}"
+    echo "This will remove: $SUDOERS_STOP_FILE"
+    read -r -p "Proceed? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Cancelled."
+        return 0
+    fi
+
+    if ! sudo rm -f "$SUDOERS_STOP_FILE"; then
+        echo -e "${RED}Error:${NC} failed to remove $SUDOERS_STOP_FILE"
+        return 1
+    fi
+    echo -e "${GREEN}Disabled.${NC} Stop Camera may ask for password again when module reload is needed."
+    return 0
+}
+
 cmd_status() {
     if ! load_config; then
         return 1
@@ -1467,6 +1627,7 @@ cmd_doctor() {
     local need_pair=false
     local need_video_group=false
     local need_secureboot_hint=false
+    local need_passwordless_stop=false
     local suggested_actions=""
     local actions_first=true
 
@@ -1608,6 +1769,21 @@ cmd_doctor() {
             warns=$((warns+1))
             need_pair=true
         fi
+
+        local reload_opt reload_lower
+        reload_opt="${RELOAD_V4L2_ON_STOP:-true}"
+        reload_lower=$(echo "$reload_opt" | tr '[:upper:]' '[:lower:]')
+        if [[ "$reload_lower" != "false" && "$reload_lower" != "0" && "$reload_lower" != "no" ]]; then
+            if passwordless_stop_enabled_for_user; then
+                doctor_emit "passwordless stop" "OK" "enabled ($SUDOERS_STOP_FILE)"
+            else
+                doctor_emit "passwordless stop" "WARN" "not enabled; stop may ask for sudo/polkit password"
+                warns=$((warns+1))
+                need_passwordless_stop=true
+            fi
+        else
+            doctor_emit "passwordless stop" "INFO" "not required (RELOAD_V4L2_ON_STOP=false)"
+        fi
     else
         :
     fi
@@ -1652,6 +1828,9 @@ cmd_doctor() {
     fi
     if [ "$need_secureboot_hint" = true ]; then
         action_add "Secure Boot is enabled: disable it or sign v4l2loopback module (MOK)"
+    fi
+    if [ "$need_passwordless_stop" = true ]; then
+        action_add "Optional convenience: run android-webcam-ctl enable-passwordless-stop"
     fi
 
     if [ "$json_mode" = true ]; then
@@ -1842,10 +2021,13 @@ case "$1" in
     logs)    cmd_logs "${2:-}" "${3:-}" ;;
     version) cmd_version ;;
     preset)  cmd_preset "${2:-}" ;;
+    enable-passwordless-stop) cmd_enable_passwordless_stop ;;
+    disable-passwordless-stop) cmd_disable_passwordless_stop ;;
+    passwordless-stop-status) cmd_passwordless_stop_status ;;
     config)  cmd_config ;;
     uninstall) cmd_uninstall ;;
     *)
-        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|preset|config|uninstall}"
+        echo "Usage: $0 {start|stop|toggle|setup|status|doctor|logs|version|preset|enable-passwordless-stop|disable-passwordless-stop|passwordless-stop-status|config|uninstall}"
         echo "       $0 doctor [--json]"
         echo "       $0 start [--dry-run]"
         echo "       $0 logs [--path] [--sessions] [--follow|-f] [--tail N|-n N]"

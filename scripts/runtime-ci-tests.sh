@@ -96,6 +96,17 @@ run_cmd() {
   "$@"
 }
 
+run_cmd_with_env() {
+  local home="$1"
+  local env_key="$2"
+  local env_val="$3"
+  shift 3
+  export HOME="$home"
+  export XDG_STATE_HOME="$home/.local/state"
+  export PATH="$home/.local/bin:$MOCKS_DIR:$PATH"
+  env "$env_key=$env_val" "$@"
+}
+
 expect_rc() {
   local expected="$1"
   local actual="$2"
@@ -265,5 +276,78 @@ set -e
 expect_rc 0 "$rc" "preset low-latency"
 grep -q 'BIT_RATE="6M"' "$home6/.config/android-webcam/settings.conf"
 grep -q 'PRESET="low-latency"' "$home6/.config/android-webcam/settings.conf"
+
+# 8) passwordless stop status command behavior (without system writes)
+home7=$(mk_test_home "passwordless-status")
+sink7="$home7/video10"
+touch "$sink7"
+touch "$home7/.local/bin/scrcpy-server"
+write_config "$home7" "$sink7"
+
+set +e
+run_cmd_with_env "$home7" ANDROID_WEBCAM_SUDOERS_STOP_FILE "$home7/sudoers-stop" "$RUNTIME_DIR/android-webcam-ctl" passwordless-stop-status > "$CI_DIR/pw-status-off.txt"
+rc=$?
+set -e
+expect_rc 1 "$rc" "passwordless status disabled"
+grep -q "not enabled" "$CI_DIR/pw-status-off.txt"
+
+cat > "$home7/sudoers-stop" <<'EOF'
+testuser ALL=(root) NOPASSWD: /usr/sbin/modprobe -r v4l2loopback, /usr/sbin/modprobe v4l2loopback
+EOF
+
+set +e
+run_cmd_with_env "$home7" ANDROID_WEBCAM_SUDOERS_STOP_FILE "$home7/sudoers-stop" "$RUNTIME_DIR/android-webcam-ctl" passwordless-stop-status > "$CI_DIR/pw-status-on.txt"
+rc=$?
+set -e
+expect_rc 1 "$rc" "passwordless status still disabled for other user"
+
+echo "$USER ALL=(root) NOPASSWD: /usr/sbin/modprobe -r v4l2loopback, /usr/sbin/modprobe v4l2loopback" > "$home7/sudoers-stop"
+set +e
+run_cmd_with_env "$home7" ANDROID_WEBCAM_SUDOERS_STOP_FILE "$home7/sudoers-stop" "$RUNTIME_DIR/android-webcam-ctl" passwordless-stop-status > "$CI_DIR/pw-status-enabled.txt"
+rc=$?
+set -e
+expect_rc 0 "$rc" "passwordless status enabled"
+grep -q "enabled" "$CI_DIR/pw-status-enabled.txt"
+
+# 9) stop fallback path: no passwordless sudo (-n fails), regular sudo path used
+home8=$(mk_test_home "stop-fallback")
+sink8="$home8/video10"
+touch "$sink8"
+touch "$home8/.local/bin/scrcpy-server"
+write_config "$home8" "$sink8"
+# Enable reload-on-stop for this scenario so stop attempts privileged module reload.
+sed -i 's/^RELOAD_V4L2_ON_STOP="false"/RELOAD_V4L2_ON_STOP="true"/' "$home8/.config/android-webcam/settings.conf"
+
+cat > "$home8/.local/bin/pgrep" <<'EOF'
+#!/usr/bin/env bash
+echo 99999
+exit 0
+EOF
+cat > "$home8/.local/bin/pkill" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat > "$home8/.local/bin/pkexec" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+cat > "$home8/.local/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "-n" ]; then
+  # simulate no passwordless rule
+  exit 1
+fi
+# interactive sudo path (password accepted)
+exit 0
+EOF
+chmod +x "$home8/.local/bin/pgrep" "$home8/.local/bin/pkill" "$home8/.local/bin/pkexec" "$home8/.local/bin/sudo"
+
+set +e
+run_cmd "$home8" "$RUNTIME_DIR/android-webcam-ctl" stop > "$CI_DIR/stop-fallback.txt" 2>&1
+rc=$?
+set -e
+expect_rc 0 "$rc" "stop fallback rc"
+grep -q "Sudo password may be required" "$CI_DIR/stop-fallback.txt"
 
 echo "Runtime CI tests passed."
