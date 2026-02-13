@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project uses SemVer-style tags.
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-02-13
+
+- Installer now offers enabling passwordless Stop Camera during setup and clearly states it creates a sudoers rule.
+- Added non-interactive flags `--yes` for `enable-passwordless-stop` and `disable-passwordless-stop`.
+- Clarified passwordless confirmation prompts to explicitly mention writing/removing sudoers rules.
+
 ## [1.2.4] - 2026-02-13
 
 - Added `android-webcam-ctl update` command with `--check` / `--yes` / `--ref` options.
